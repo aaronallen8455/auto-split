@@ -1,0 +1,54 @@
+cabal-version:      3.0
+name:               ksplit
+version:            0.1.0.0
+-- synopsis:
+-- description:
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             Aaron Allen
+maintainer:         aaronallen8455@gmail.com
+-- copyright:
+category:           Development
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+-- extra-source-files:
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    exposed-modules:  Ksplit
+    other-modules: Ksplit.GhcFacade
+    -- other-extensions:
+    build-depends:    base >=4.18.1.0,
+                      ghc,
+                      syb,
+                      ghc-exactprint,
+                      ghc-paths,
+                      transformers,
+                      containers
+    hs-source-dirs:   src
+    default-language: GHC2021
+
+executable app
+    import:           warnings
+    -- other-extensions:
+    build-depends:    base >=4.18.1.0,
+                      ksplit
+    hs-source-dirs:   app
+    default-language: GHC2021
+    ghc-options: -fplugin Ksplit
+    main-is: Main.hs
+
+test-suite ksplit-test
+    import:           warnings
+    default-language: GHC2021
+    -- other-modules:
+    -- other-extensions:
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Main.hs
+    build-depends:
+        base >=4.18.1.0,
+        ksplit
