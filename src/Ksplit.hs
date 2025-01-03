@@ -1,18 +1,20 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 module Ksplit
   ( pattern SPLIT
   , plugin
   ) where
 
 import           Control.Exception
+import           Control.Monad
 import qualified Control.Monad.Trans.Writer.CPS as Writer
 import           Data.Foldable
 import           Data.Functor
 import qualified Data.Generics as Syb
 import           Data.IORef
-import           Data.Maybe (mapMaybe)
+import           Data.Maybe
 import           Data.Monoid (Any(..))
 import qualified Data.Map.Strict as M
 import           Data.String (fromString)
@@ -64,39 +66,34 @@ addDsHook hscEnv = hscEnv
       case tPhase of
         Ghc.T_HscPostTc env modSum tcResult@(Ghc.FrontendTypecheck gblEnv) warns mOldHash -> do
           usedGres <- readIORef $ Ghc.tcg_used_gres gblEnv
-          let allSplits = filter ((== "SPLIT") . Ghc.getOccFS . Ghc.gre_name) usedGres
+          let usesSplit = any ((== "SPLIT") . Ghc.getOccFS . Ghc.gre_name) usedGres
               mFilePath = Ghc.ml_hs_file (Ghc.ms_location modSum)
-          case allSplits of
-            [] -> runPhaseOrExistingHook tPhase
-            [_] -> do
-              let customError =
-                    Ghc.mkPlainErrorMsgEnvelope
-                      (maybe Ghc.noSrcSpan (Ghc.mkGeneralSrcSpan . fromString) mFilePath)
-                      (Ghc.ghcUnknownMessage PatternSplitDiag)
-                  warnsWithError = Ghc.addMessage customError warns
-              catch
-                (runPhaseOrExistingHook $ Ghc.T_HscPostTc env modSum tcResult warnsWithError mOldHash)
-                (\(Ghc.SourceError msgs) -> do
-                  let (missingPatWarns, otherWarns) = Ghc.partitionBagWith isMissingPatWarn (Ghc.getMessages msgs)
-                  mResult <- EP.parseModule Paths.libdir `traverse` mFilePath
-                  case mResult of
-                    Just (Right parsedMod) -> trace (Ghc.showSDocUnsafe $ Ghc.ppr $ Ghc.hsmodDecls $ Ghc.unLoc parsedMod) $!
-                      traverse_ ( \w -> do
-                                 case splitPattern w parsedMod of
-                                   (ps, Any True) ->
-                                     traverse_ (flip writeFile $ EP.exactPrint ps) mFilePath
-                                   _ -> pure ()
-                               )
-                        missingPatWarns
-                    _ -> pure ()
-                  throw . Ghc.SourceError $ Ghc.mkMessages otherWarns
-                )
-            _ -> do
-              let multipleSplitsDiag =
-                    Ghc.mkPlainErrorMsgEnvelope
-                      (maybe Ghc.noSrcSpan (Ghc.mkGeneralSrcSpan . fromString) mFilePath)
-                      (Ghc.ghcUnknownMessage MultipleSplitsDiag)
-              throw . Ghc.SourceError $ Ghc.addMessage multipleSplitsDiag warns
+          if not usesSplit
+          then runPhaseOrExistingHook tPhase
+          else do
+            let customError =
+                  Ghc.mkPlainErrorMsgEnvelope
+                    (maybe Ghc.noSrcSpan (Ghc.mkGeneralSrcSpan . fromString) mFilePath)
+                    (Ghc.ghcUnknownMessage PatternSplitDiag)
+                warnsWithError = Ghc.addMessage customError warns
+            catch
+              (runPhaseOrExistingHook $ Ghc.T_HscPostTc env modSum tcResult warnsWithError mOldHash)
+              (\(Ghc.SourceError msgs) -> do
+                let (missingPatWarns, otherWarns) = Ghc.partitionBagWith isMissingPatWarn (Ghc.getMessages msgs)
+                mResult <- EP.parseModule Paths.libdir `traverse` mFilePath
+                case mResult of
+                  Just (Right parsedMod) -> do
+                    let qualiImps = getQualifiedImports parsedMod
+                    traverse_ ( \w -> do
+                               case splitPattern qualiImps w parsedMod of
+                                 (ps, Any True) ->
+                                   traverse_ (flip writeFile $ EP.exactPrint ps) mFilePath
+                                 _ -> pure ()
+                             )
+                      missingPatWarns
+                  _ -> pure ()
+                throw . Ghc.SourceError $ Ghc.mkMessages otherWarns
+              )
         _ -> runPhaseOrExistingHook tPhase
 
 -- | Diagnostic thrown when case splitting should be attempted.
@@ -104,16 +101,7 @@ data PatternSplitDiag = PatternSplitDiag
 
 instance Ghc.Diagnostic PatternSplitDiag where
   type DiagnosticOpts PatternSplitDiag = Ghc.NoDiagnosticOpts
-  diagnosticMessage _ _ = Ghc.mkSimpleDecorated (Ghc.text "Splitting a pattern (not actually an error)")
-  diagnosticReason _ = Ghc.ErrorWithoutFlag
-  diagnosticHints _ = []
-  diagnosticCode _ = Nothing
-
-data MultipleSplitsDiag = MultipleSplitsDiag
-
-instance Ghc.Diagnostic MultipleSplitsDiag where
-  type DiagnosticOpts MultipleSplitsDiag = Ghc.NoDiagnosticOpts
-  diagnosticMessage _ _ = Ghc.mkSimpleDecorated (Ghc.text "Multiple uses of SPLIT found. There can only be one occurrence per module per compilation.")
+  diagnosticMessage _ _ = Ghc.mkSimpleDecorated (Ghc.text "Splitting a pattern (not an error)")
   diagnosticReason _ = Ghc.ErrorWithoutFlag
   diagnosticHints _ = []
   diagnosticCode _ = Nothing
@@ -127,10 +115,13 @@ data NonExhaustivePattern = NonExhaustivePattern
   }
 
 -- | Finds the target pattern and splits it. Returns the modified source and True if successful.
-splitPattern :: NonExhaustivePattern -> Ghc.ParsedSource -> (Ghc.ParsedSource, Any)
-splitPattern nePat ps = Writer.runWriter $ Syb.everywhereM (Syb.mkM (Writer.writer . go)) ps
+splitPattern
+  :: M.Map Ghc.ModuleName Ghc.ModuleName
+  -> NonExhaustivePattern
+  -> Ghc.ParsedSource
+  -> (Ghc.ParsedSource, Any)
+splitPattern qualiImps nePat ps = Writer.runWriter $ Syb.everywhereM (Syb.mkM (Writer.writer . go)) ps
   where
-  qualiImps = getQualifiedImports ps
   -- TODO could find the decl that encompasses the warn's span rather than
   -- traversing the entire module AST.
   go :: Ghc.LHsExpr Ghc.GhcPs -> (Ghc.LHsExpr Ghc.GhcPs, Any)
@@ -151,9 +142,9 @@ splitPattern nePat ps = Writer.runWriter $ Syb.everywhereM (Syb.mkM (Writer.writ
           newMatches = correctDeltas $ do
             nabla <- patternNablas nePat
             x <- patternIds nePat
-            let pat = mkPat qualiImps True nabla x
+            let pat = mkPat qualiImps nabla True False x
             [ Ghc.L splitAnn $ Ghc.Match [] ctx [pat] rhs ]
-          newMatchGroup = beforeSplit ++ newMatches ++ afterSplit
+          newMatchGroup = beforeSplit ++ newMatches ++ filter (not . matchHasSplit) afterSplit
           -- The same comment can appear in both the matches annotation and the
           -- annotation of individual matches. Remove from the outer annotation
           -- if so.
@@ -183,22 +174,23 @@ matchHasSplit = Syb.everything (||) $ Syb.mkQ False isSplitCon
 -- top down manner
 
 -- | Produce a 'Pat' for a missing pattern
--- TODO handle special cases for tuples
 mkPat
   :: M.Map Ghc.ModuleName Ghc.ModuleName
-  -> Bool
   -> Ghc.Nabla
+  -> Bool
+  -> Bool
   -> Ghc.Id
   -> Ghc.LPat Ghc.GhcPs
-mkPat qualiImps isOutermost nabla x = Ghc.L (Ghc.EpAnn delta Ghc.noAnn Ghc.emptyComments) $
+mkPat qualiImps nabla isOutermost needsLeftPad x = Ghc.L (Ghc.EpAnn delta Ghc.noAnn Ghc.emptyComments) $
   case Ghc.lookupSolution nabla x of
     Nothing -> Ghc.WildPat Ghc.noExtField
-    Just (Ghc.PACA (Ghc.PmAltConLike con) tvs args) ->
-      paren args . Ghc.ConPat [] (Ghc.noLocA . nameToRdrName qualiImps $ Ghc.conLikeName con) $
-        case Ghc.conLikeIsInfix con of
-          True | [arg1, arg2] <- args ->
-              Ghc.InfixCon (mkPat qualiImps False nabla arg1) (mkPat qualiImps False nabla arg2)
-          _ -> Ghc.PrefixCon [] (mkPat qualiImps False nabla <$> args)
+    Just (Ghc.PACA (Ghc.PmAltConLike con) tvs args) -> paren args $
+      -- TODO use literal patterns for lists, tuples, etc
+      case Ghc.conLikeIsInfix con of
+        True | [arg1, arg2] <- args -> Ghc.ConPat [] (Ghc.L (Ghc.EpAnn EP.d1 Ghc.noAnn Ghc.emptyComments) . nameToRdrName qualiImps $ Ghc.conLikeName con) $
+          Ghc.InfixCon (mkPat qualiImps nabla False False arg1) (mkPat qualiImps nabla False True arg2)
+        _ -> Ghc.ConPat [] (Ghc.L (Ghc.EpAnn EP.d0 Ghc.noAnn Ghc.emptyComments) . nameToRdrName qualiImps $ Ghc.conLikeName con) $
+          Ghc.PrefixCon [] (mkPat qualiImps nabla False True <$> args)
     Just (Ghc.PACA (Ghc.PmAltLit lit) _tvs args) -> Ghc.LitPat Ghc.noExtField $
       case Ghc.pm_lit_val lit of
         Ghc.PmLitInt integer -> Ghc.HsInt Ghc.noExtField (Ghc.IL Ghc.NoSourceText (integer < 0) integer)
@@ -209,11 +201,11 @@ mkPat qualiImps isOutermost nabla x = Ghc.L (Ghc.EpAnn delta Ghc.noAnn Ghc.empty
         Ghc.PmLitOverRat int fractionalLit -> undefined -- TODO
         Ghc.PmLitOverString fastString -> Ghc.HsString Ghc.NoSourceText fastString
   where
-    delta = if isOutermost then EP.d0 else EP.d1
+    delta = if needsLeftPad then EP.d1 else EP.d0
     paren [] inner = inner
     paren _ inner =
       if not isOutermost
-      then Ghc.ParPat (Ghc.EpTok EP.d0, Ghc.EpTok EP.d0) (Ghc.L (Ghc.EpAnn (Ghc.EpaDelta (Ghc.SameLine 0) []) Ghc.noAnn Ghc.emptyComments) inner)
+      then Ghc.ParPat (Ghc.EpTok EP.d0, Ghc.EpTok EP.d0) (Ghc.L (Ghc.EpAnn EP.d0 Ghc.noAnn Ghc.emptyComments) inner)
       else inner
 
 addImport :: Ghc.ParsedResult -> Ghc.ParsedResult
@@ -248,8 +240,10 @@ getQualifiedImports :: Ghc.ParsedSource -> M.Map Ghc.ModuleName Ghc.ModuleName
 getQualifiedImports (Ghc.L _ mo) = M.fromList . mapMaybe getQuali $ Ghc.hsmodImports mo
   where
     getQuali (Ghc.L _ x) = do
-      qual <- Ghc.unLoc <$> Ghc.ideclAs x
-      Just (Ghc.unLoc $ Ghc.ideclName x, qual)
+      guard $ Ghc.ideclQualified x /= Ghc.NotQualified
+      let mQualAs = Ghc.unLoc <$> Ghc.ideclAs x
+          modName = Ghc.unLoc $ Ghc.ideclName x
+      Just (modName, fromMaybe modName mQualAs)
 
 nameToRdrName :: M.Map Ghc.ModuleName Ghc.ModuleName -> Ghc.Name -> Ghc.RdrName
 nameToRdrName qualiImps n =
