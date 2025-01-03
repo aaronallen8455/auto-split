@@ -1,5 +1,6 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE LambdaCase #-}
 module Main where
 
 import           Data.Maybe
@@ -33,12 +34,13 @@ pattern N = Nothing
 
 data Rec = Rec { one :: Bool, two :: Bool }
 
-test :: Rec -> Bool
-test x = case x of
-  Rec False _ -> False
-  Rec True _ -> False
-
-
+test :: Bool -> F.Foo -> Bool
+test True F.Foo = True
+test True F.Bar = True
+test True F.Baz = True
+test False F.Foo = True
+test False F.Bar = True
+test False F.Baz = True
 
 -- bar :: F.Foo -> F.Foo -> Bool
 -- bar F.Foo F.Foo = True

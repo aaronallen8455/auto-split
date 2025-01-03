@@ -1,4 +1,4 @@
 
-Known issues:
-- Does not work well with view patterns
-- Using SPLIT will add patterns for _all_ missing cases, not just the point where SPLIT is used
+Known caveats:
+- Does not play well with view patterns
+- Using SPLIT in pattern match will insert patterns for _all_ missing cases. It doesn't restrict to the position where SPLIT is used.
