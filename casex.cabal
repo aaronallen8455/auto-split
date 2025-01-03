@@ -1,5 +1,5 @@
 cabal-version:      3.0
-name:               ksplit
+name:               casex
 version:            0.1.0.0
 -- synopsis:
 -- description:
@@ -18,8 +18,8 @@ common warnings
 
 library
     import:           warnings
-    exposed-modules:  Ksplit
-    other-modules: Ksplit.GhcFacade
+    exposed-modules:  CaseX
+    other-modules: CaseX.GhcFacade
     -- other-extensions:
     build-depends:    base >=4.18.1.0,
                       ghc,
@@ -35,10 +35,10 @@ executable app
     import:           warnings
     -- other-extensions:
     build-depends:    base >=4.18.1.0,
-                      ksplit
+                      casex
     hs-source-dirs:   app
     default-language: GHC2021
-    ghc-options: -fplugin Ksplit
+    ghc-options: -fplugin CaseX
     main-is: Main.hs
 
 test-suite ksplit-test
@@ -51,4 +51,4 @@ test-suite ksplit-test
     main-is:          Main.hs
     build-depends:
         base >=4.18.1.0,
-        ksplit
+        casex

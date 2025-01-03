@@ -1,0 +1,3 @@
+- Utilize pattern literals for lists and tuples
+- Support multiple GHC versions
+- Tests

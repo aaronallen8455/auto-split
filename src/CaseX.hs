@@ -1,7 +1,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Ksplit
+module CaseX
   ( pattern SPLIT
   , plugin
   ) where
@@ -21,7 +21,7 @@ import qualified GHC.Data.EnumSet as EnumSet
 import qualified GHC.Paths as Paths
 import qualified Language.Haskell.GHC.ExactPrint as EP
 
-import qualified Ksplit.GhcFacade as Ghc
+import qualified CaseX.GhcFacade as Ghc
 
 -- | Used to induce the incomplete patterns warning from GHC
 pattern SPLIT :: a
@@ -291,25 +291,25 @@ addImport result = result
         { Ghc.hpm_module = Ghc.hpm_module resMod <&> \pMod ->
             pMod
               { Ghc.hsmodImports =
-                  ksplitImport : Ghc.hsmodImports pMod
+                  caseXImport : Ghc.hsmodImports pMod
               }
         }
   }
   where
-    ksplitImport = Ghc.noLocA . Ghc.simpleImportDecl $ Ghc.mkModuleName ksplitName
+    caseXImport = Ghc.noLocA . Ghc.simpleImportDecl $ Ghc.mkModuleName caseXName
 
 -- | The automatically added import gets flagged as unused even if it is used.
 -- The solution here is to simply suppress the warning.
 removeUnusedImportWarn :: Ghc.TcM ()
 removeUnusedImportWarn = do
   errsVar <- Ghc.getErrsVar
-  let isKsplitImportWarn msgEnv =
+  let isCaseXImportWarn msgEnv =
         case Ghc.errMsgDiagnostic msgEnv of
           Ghc.TcRnMessageWithInfo _ (Ghc.TcRnMessageDetailed _ (Ghc.TcRnUnusedImport decl _)) ->
-            Ghc.unLoc (Ghc.ideclName decl) == Ghc.mkModuleName ksplitName
+            Ghc.unLoc (Ghc.ideclName decl) == Ghc.mkModuleName caseXName
           _ -> False
   Ghc.liftIO . modifyIORef errsVar $
-    Ghc.mkMessages . Ghc.filterBag (not . isKsplitImportWarn) . Ghc.getMessages
+    Ghc.mkMessages . Ghc.filterBag (not . isCaseXImportWarn) . Ghc.getMessages
   pure ()
 
 -- | It is necessary to track what modules are imported qualified so that
@@ -334,5 +334,5 @@ nameToRdrName qualiImps n =
 splitName :: IsString a => a
 splitName = "SPLIT"
 
-ksplitName :: IsString a => a
-ksplitName = "Ksplit"
+caseXName :: IsString a => a
+caseXName = "CaseX"
