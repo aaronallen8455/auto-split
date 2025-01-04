@@ -57,22 +57,18 @@ addDsHook hscEnv = hscEnv
   { Ghc.hsc_hooks =
       let hooks = Ghc.hsc_hooks hscEnv
        in hooks
-          { Ghc.runPhaseHook = Just $ phaseHook (Ghc.runPhaseHook hooks)
-          }
+          { Ghc.runPhaseHook = Just $ phaseHook (Ghc.runPhaseHook hooks) }
   }
   where
     phaseHook mExistingHook = Ghc.PhaseHook $ \tPhase -> do
-      --errsVar <- Ghc.getErrsVar
       let isMissingPatWarn msgEnv =
             case Ghc.errMsgDiagnostic msgEnv of
-              Ghc.GhcDsMessage (Ghc.DsNonExhaustivePatterns ctx _ _ patIds nablas)
+              Ghc.GhcDsMessage (Ghc.DsNonExhaustivePatterns _ _ _ patIds nablas)
                 | Just srcSpan <- Ghc.srcSpanToRealSrcSpan (Ghc.errMsgSpan msgEnv) -> Left
                 NonExhaustivePattern
-                  { matchContext = ctx
-                  , patternIds = patIds
+                  { patternIds = patIds
                   , patternNablas = nablas
                   , srcCodeLoc = srcSpan
-                  , origMessage = msgEnv
                   }
               _ -> Right msgEnv
           runPhaseOrExistingHook = maybe Ghc.runPhase (\(Ghc.PhaseHook h) -> h) mExistingHook
@@ -97,13 +93,10 @@ addDsHook hscEnv = hscEnv
                 case mResult of
                   Just (Right parsedMod) -> do
                     let qualiImps = getQualifiedImports parsedMod
-                    traverse_ ( \w -> do
-                               case splitPattern qualiImps w parsedMod of
-                                 (ps, Any True) ->
-                                   traverse_ (flip writeFile $ EP.exactPrint ps) mFilePath
-                                 _ -> pure ()
-                             )
-                      missingPatWarns
+                    case splitPattern qualiImps missingPatWarns parsedMod of
+                      (ps, Any True) ->
+                        traverse_ (flip writeFile $ EP.exactPrint ps) mFilePath
+                      _ -> pure ()
                   _ -> pure ()
                 throw . Ghc.SourceError $ Ghc.mkMessages otherWarns
               )
@@ -120,46 +113,41 @@ instance Ghc.Diagnostic PatternSplitDiag where
   diagnosticCode _ = Nothing
 
 data NonExhaustivePattern = NonExhaustivePattern
-  { matchContext :: !Ghc.HsMatchContextRn
-  , patternIds :: [Ghc.Id]
+  { patternIds :: [Ghc.Id]
   , patternNablas :: [Ghc.Nabla]
   , srcCodeLoc :: Ghc.RealSrcSpan
-  , origMessage :: Ghc.MsgEnvelope Ghc.GhcMessage
   }
 
 -- | Finds the target pattern and splits it. Returns the modified source and True if successful.
 splitPattern
   :: M.Map Ghc.ModuleName Ghc.ModuleName
-  -> NonExhaustivePattern
+  -> Ghc.Bag NonExhaustivePattern
   -> Ghc.ParsedSource
   -> (Ghc.ParsedSource, Any)
-splitPattern qualiImps nePat ps =
+splitPattern qualiImps nePats ps =
     Writer.runWriter $
       Syb.everywhereM
         ( Syb.mkM (Writer.writer . goExpr)
           `Syb.extM` (Writer.writer . goDecl)
         ) ps
   where
-  -- TODO could find the decl that encompasses the warn's span rather than
-  -- traversing the entire module AST for each warn.
-  -- Or, do all warns in a single traversal
   goExpr :: Ghc.LHsExpr Ghc.GhcPs -> (Ghc.LHsExpr Ghc.GhcPs, Any)
   goExpr expr@(Ghc.L ann (Ghc.HsCase x scrut _))
     | Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
-    , caseLoc == srcCodeLoc nePat
+    , Just nePat <- find ((caseLoc ==) . srcCodeLoc) nePats
     , Ghc.L _ (Ghc.HsCase _ _ deltaMG@(Ghc.MG _ (Ghc.L _ _matches)))
         <- EP.makeDeltaAst expr
-    , Just newMG <- splitMG False False 0 deltaMG
+    , Just newMG <- splitMG False False 0 nePat deltaMG
     = ( Ghc.L ann (Ghc.HsCase x scrut newMG)
       , Any True
       )
   goExpr expr@(Ghc.L ann (Ghc.HsLam x lamType _))
     | lamType /= Ghc.LamSingle
     , Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
-    , caseLoc == srcCodeLoc nePat
+    , Just nePat <- find ((caseLoc ==) . srcCodeLoc) nePats
     , Ghc.L _ (Ghc.HsLam _ _ deltaMG@(Ghc.MG _ (Ghc.L matchesAnn _matches)))
         <- EP.makeDeltaAst expr
-    , Just newMG <- splitMG True False (colDelta matchesAnn) deltaMG
+    , Just newMG <- splitMG True False (colDelta matchesAnn) nePat deltaMG
     = ( Ghc.L ann (Ghc.HsLam x lamType newMG)
       , Any True
       )
@@ -168,17 +156,17 @@ splitPattern qualiImps nePat ps =
   goDecl :: Ghc.LHsDecl Ghc.GhcPs -> (Ghc.LHsDecl Ghc.GhcPs, Any)
   goDecl decl@(Ghc.L ann (Ghc.ValD x (Ghc.FunBind x2 fid _)))
     | Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
-    , caseLoc == srcCodeLoc nePat
+    , Just nePat <- find ((caseLoc ==) . srcCodeLoc) nePats
     , Ghc.L _ (Ghc.ValD _ (Ghc.FunBind _ _ deltaMG@(Ghc.MG _ (Ghc.L _ _))))
         <- EP.makeDeltaAst decl
-    , Just newMG <- splitMG True True 0 deltaMG
+    , Just newMG <- splitMG True True 0 nePat deltaMG
     = ( Ghc.L ann (Ghc.ValD x (Ghc.FunBind x2 fid newMG))
       , Any True
       )
   goDecl decl = (decl, Any False)
 
   -- Should be applied after the delta transformation
-  splitMG multiplePats offsetFirstPat colOffset (Ghc.MG x2 (Ghc.L ann2 matches))
+  splitMG multiplePats offsetFirstPat colOffset nePat (Ghc.MG x2 (Ghc.L ann2 matches))
     | (beforeSplit, Ghc.L splitAnn (Ghc.Match _ ctx _ rhs) : afterSplit)
         <- break matchHasSplit matches
     , let -- If splitting the first match, trailing matches need to have a delta
@@ -191,7 +179,7 @@ splitPattern qualiImps nePat ps =
           newMatches = correctDeltas $ do
             nabla <- patternNablas nePat
             let pats =
-                  zipWith (mkPat qualiImps nabla multiplePats)
+                  zipWith (mkPat qualiImps nabla $ not multiplePats)
                           (offsetFirstPat : repeat True)
                           (patternIds nePat)
             [ Ghc.L splitAnn $ Ghc.Match [] ctx pats rhs ]
@@ -230,7 +218,7 @@ mkPat
   :: M.Map Ghc.ModuleName Ghc.ModuleName
   -> Ghc.Nabla
   -> Bool -- ^ True => is a singular pattern which doesn't need outer parens
-  -> Bool -- ^ True => needs left padding due to separate it from another pattern
+  -> Bool -- ^ True => needs left padding due separate it from another pattern
   -> Ghc.Id
   -> Ghc.LPat Ghc.GhcPs
 mkPat qualiImps nabla isOutermost needsLeftPad x = Ghc.L (Ghc.EpAnn delta Ghc.noAnn Ghc.emptyComments) $
@@ -310,7 +298,6 @@ removeUnusedImportWarn = do
           _ -> False
   Ghc.liftIO . modifyIORef errsVar $
     Ghc.mkMessages . Ghc.filterBag (not . isCaseXImportWarn) . Ghc.getMessages
-  pure ()
 
 -- | It is necessary to track what modules are imported qualified so that
 -- constructors in generated patterns can be correctly qualified.

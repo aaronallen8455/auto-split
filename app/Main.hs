@@ -34,13 +34,20 @@ pattern N = Nothing
 
 data Rec = Rec { one :: Bool, two :: Bool }
 
-test :: Bool -> F.Foo -> Bool
-test True F.Foo = True
-test True F.Bar = True
-test True F.Baz = True
-test False F.Foo = True
-test False F.Bar = True
-test False F.Baz = True
+test :: Maybe Bool -> Bool
+test = _
+
+-- This produces unexpected results:
+-- test :: Maybe Bool -> Either F.Foo Bool -> Bool
+-- test Nothing (Left F.Foo) = True
+-- test Nothing (Left F.Bar) = True
+-- test Nothing (Left F.Baz) = True
+-- test Nothing (Right False) = True
+-- test Nothing (Right True) = True
+-- test (Just False) (Left SPLIT) = True
+-- test (Just False) (Right SPLIT) = True
+-- test (Just True) (Left SPLIT) = True
+-- test (Just True) (Right SPLIT) = True
 
 -- bar :: F.Foo -> F.Foo -> Bool
 -- bar F.Foo F.Foo = True
