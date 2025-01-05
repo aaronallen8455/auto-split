@@ -60,3 +60,4 @@ Known caveats:
 - Using SPLIT in pattern match will insert patterns for _all_ missing
   cases. It doesn't restrict to the position where SPLIT is used, as some users
   might expect.
+- If there are no missing patterns then SPLIT will have no effect

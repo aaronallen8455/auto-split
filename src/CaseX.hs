@@ -243,24 +243,19 @@ mkPat qualiImps nabla isOutermost needsLeftPad x = Ghc.L (Ghc.EpAnn delta Ghc.no
                              . nameToRdrName qualiImps $ Ghc.conLikeName con
                              )
              $ Ghc.PrefixCon [] (mkPat qualiImps nabla False True <$> args)
-    Just (Ghc.PACA (Ghc.PmAltLit lit) _tvs _args) -> Ghc.LitPat Ghc.noExtField $
+    Just (Ghc.PACA (Ghc.PmAltLit lit) _tvs _args) ->
       case Ghc.pm_lit_val lit of
-        Ghc.PmLitInt integer -> Ghc.HsInteger Ghc.NoSourceText integer (Ghc.pmLitType lit)
-        Ghc.PmLitRat rational -> Ghc.HsRat Ghc.noExtField (Ghc.fractionalLitFromRational rational) (Ghc.pmLitType lit)
-        Ghc.PmLitChar char -> Ghc.HsChar Ghc.NoSourceText char
-        Ghc.PmLitString fastString -> Ghc.HsString Ghc.NoSourceText fastString
-        Ghc.PmLitOverInt minuses integer ->
-          Ghc.HsInteger Ghc.NoSourceText
-            (if odd minuses then negate integer else integer)
-            (Ghc.pmLitType lit)
-        Ghc.PmLitOverRat minuses fractionalLit ->
-          Ghc.HsRat Ghc.noExtField
-            ( Ghc.fractionalLitFromRational
-            . (if odd minuses then negate else id)
-            $ Ghc.rationalFromFractionalLit fractionalLit
-            )
-            (Ghc.pmLitType lit)
-        Ghc.PmLitOverString fastString -> Ghc.HsString Ghc.NoSourceText fastString
+        Ghc.PmLitInt integer ->
+          Ghc.NPat [] (Ghc.noLocA $ Ghc.OverLit Ghc.noExtField $ Ghc.HsIntegral $ Ghc.IL (Ghc.SourceText . fromString $ show integer) (integer < 0) integer) Nothing Ghc.noExtField
+        Ghc.PmLitRat rational ->
+          Ghc.NPat [] (Ghc.noLocA $ Ghc.OverLit Ghc.noExtField $ Ghc.HsFractional $ Ghc.mkTHFractionalLit rational) Nothing Ghc.noExtField
+        Ghc.PmLitChar char -> Ghc.LitPat Ghc.noExtField $ Ghc.HsChar Ghc.NoSourceText char
+        Ghc.PmLitString fastString -> Ghc.LitPat Ghc.noExtField $ Ghc.HsString Ghc.NoSourceText fastString
+        Ghc.PmLitOverInt _minuses integer ->
+          Ghc.NPat [] (Ghc.noLocA $ Ghc.OverLit Ghc.noExtField $ Ghc.HsIntegral $ Ghc.IL (Ghc.SourceText . fromString $ show integer) (integer < 0) integer) Nothing Ghc.noExtField
+        Ghc.PmLitOverRat _minuses fractionalLit ->
+          Ghc.NPat [] (Ghc.noLocA $ Ghc.OverLit Ghc.noExtField $ Ghc.HsFractional fractionalLit) Nothing Ghc.noExtField
+        Ghc.PmLitOverString fastString -> Ghc.LitPat Ghc.noExtField $ Ghc.HsString Ghc.NoSourceText fastString
   where
     delta = if needsLeftPad then EP.d1 else EP.d0
     paren [] inner = inner

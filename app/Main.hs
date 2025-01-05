@@ -4,6 +4,7 @@
 module Main where
 
 import           Data.Maybe
+import           Data.Void
 import qualified Foo as F
 
 main :: IO ()
@@ -33,9 +34,6 @@ pattern N = Nothing
 {-# COMPLETE J, N #-}
 
 data Rec = Rec { one :: Bool, two :: Bool }
-
-test :: Maybe Bool -> Bool
-test = _
 
 -- This produces unexpected results:
 -- test :: Maybe Bool -> Either F.Foo Bool -> Bool
