@@ -225,7 +225,6 @@ mkPat qualiImps nabla isOutermost needsLeftPad x = Ghc.L (Ghc.EpAnn delta Ghc.no
   case Ghc.lookupSolution nabla x of
     Nothing -> Ghc.WildPat Ghc.noExtField
     Just (Ghc.PACA (Ghc.PmAltConLike con) _tvs args) -> paren args $
-      -- TODO use literal patterns for lists, tuples, etc
       case Ghc.conLikeIsInfix con of
         True | [arg1, arg2] <- args ->
           Ghc.ConPat []
@@ -235,6 +234,22 @@ mkPat qualiImps nabla isOutermost needsLeftPad x = Ghc.L (Ghc.EpAnn delta Ghc.no
             )
           $ Ghc.InfixCon (mkPat qualiImps nabla False False arg1)
                          (mkPat qualiImps nabla False True arg2)
+        _ | Ghc.RealDataCon dc <- con
+          , Ghc.isUnboxedTupleDataCon dc
+          -> Ghc.TuplePat
+               [ Ghc.AddEpAnn Ghc.AnnOpenPH EP.d0
+               , Ghc.AddEpAnn Ghc.AnnClosePH EP.d0
+               ]
+               (addCommaAnns $ zipWith (mkPat qualiImps nabla True) (False : repeat True) args)
+               Ghc.Unboxed
+        _ | Ghc.RealDataCon dc <- con
+          , Ghc.isTupleDataCon dc
+          -> Ghc.TuplePat
+               [ Ghc.AddEpAnn Ghc.AnnOpenP EP.d0
+               , Ghc.AddEpAnn Ghc.AnnCloseP EP.d0
+               ]
+               (addCommaAnns $ zipWith (mkPat qualiImps nabla True) (False : repeat True) args)
+               Ghc.Boxed
         _ ->
           -- If GHC tries to use SPLIT as a missing pattern, replace it with wildcard
           if Ghc.occName (Ghc.conLikeName con) == Ghc.mkDataOcc splitName
@@ -263,6 +278,9 @@ mkPat qualiImps nabla isOutermost needsLeftPad x = Ghc.L (Ghc.EpAnn delta Ghc.no
       if not isOutermost
       then Ghc.ParPat (Ghc.EpTok EP.d0, Ghc.EpTok EP.d0) (Ghc.L (Ghc.EpAnn EP.d0 Ghc.noAnn Ghc.emptyComments) inner)
       else inner
+    addCommaAnns [] = []
+    addCommaAnns [a] = [a]
+    addCommaAnns (Ghc.L epAnn a : rest) = Ghc.L (EP.addComma epAnn) a : addCommaAnns rest
 
 -- | Adds the import for SPLIT to the module being compiled. Otherwise users
 -- would have to manually add this import everytime they want to do pattern splitting.

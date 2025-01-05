@@ -4,6 +4,7 @@ module CaseX.GhcFacade
 
 import           GHC as Ghc (ParsedSource)
 import           GHC.Core.ConLike as Ghc
+import           GHC.Core.DataCon as Ghc
 import           GHC.Data.Bag as Ghc
 import           GHC.Driver.DynFlags as Ghc
 import           GHC.Driver.Env as Ghc
@@ -30,3 +31,4 @@ import           GHC.Unit.Module.ModSummary as Ghc
 import           GHC.Unit.Types as Ghc
 import           GHC.Utils.Error as Ghc
 import           GHC.Utils.Outputable as Ghc
+import           Language.Haskell.Syntax.Basic as Ghc

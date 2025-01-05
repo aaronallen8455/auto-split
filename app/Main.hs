@@ -35,6 +35,11 @@ pattern N = Nothing
 
 data Rec = Rec { one :: Bool, two :: Bool }
 
+test :: Bool
+test = case ((), (), (), ()) of
+         ((), (), (), ()) -> True
+
+
 -- This produces unexpected results:
 -- test :: Maybe Bool -> Either F.Foo Bool -> Bool
 -- test Nothing (Left F.Foo) = True
