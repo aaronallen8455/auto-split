@@ -1,0 +1,22 @@
+cabal-version:      3.0
+name:               test-modules
+version:            0.1.0.0
+
+common attrs
+    ghc-options: -fplugin CaseX
+    build-depends:    base,
+                      casex
+    hs-source-dirs:   .
+    default-language: GHC2021
+
+executable Case1
+    import: attrs
+    main-is: Case1.hs
+
+executable Case2
+    import: attrs
+    main-is: Case2.hs
+
+executable Case3
+    import: attrs
+    main-is: Case3.hs

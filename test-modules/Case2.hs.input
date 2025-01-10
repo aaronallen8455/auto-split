@@ -1,0 +1,12 @@
+module Case1 where
+
+main :: IO ()
+main = pure ()
+
+test :: Maybe Bool -> Bool
+test x = case x of
+  -- 1
+  Nothing -> False
+  -- 2
+  Just SPLIT -> True
+  -- 3

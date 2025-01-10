@@ -1,0 +1,3 @@
+packages:
+  casex.cabal
+  test-modules/test-modules.cabal
