@@ -22,6 +22,7 @@ import           Data.String (IsString, fromString)
 import qualified GHC.Data.EnumSet as EnumSet
 import qualified GHC.Paths as Paths
 import qualified Language.Haskell.GHC.ExactPrint as EP
+import qualified Language.Haskell.GHC.ExactPrint.Parsers as EP
 import           Text.Read (readMaybe)
 
 import qualified CaseX.GhcFacade as Ghc
@@ -92,7 +93,11 @@ addDsHook hscEnv = hscEnv
               (runPhaseOrExistingHook $ Ghc.T_HscPostTc env modSum tcResult warnsWithError mOldHash)
               (\(Ghc.SourceError msgs) -> do
                 let (missingPatWarns, otherWarns) = Ghc.partitionBagWith isMissingPatWarn (Ghc.getMessages msgs)
-                mResult <- EP.parseModule Paths.libdir `traverse` mFilePath
+                    dynFlags = Ghc.ms_hspp_opts modSum `Ghc.gopt_set` Ghc.Opt_KeepRawTokenStream
+                mResult <- EP.ghcWrapper Paths.libdir $
+                  fmap EP.postParseTransform
+                    <$> EP.parseModuleEpAnnsWithCppInternal EP.defaultCppOptions dynFlags
+                          `traverse` mFilePath
                 case mResult of
                   Just (Right parsedMod) -> do
                     let qualiImps = getQualifiedImports parsedMod

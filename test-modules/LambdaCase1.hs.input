@@ -1,0 +1,8 @@
+module LambdaCase1 where
+
+main :: IO ()
+main = pure ()
+
+test :: Bool -> Bool
+test = \case
+  SPLIT -> False

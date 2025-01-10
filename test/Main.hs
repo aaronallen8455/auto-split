@@ -8,10 +8,19 @@ import qualified System.Process as Proc
 
 main :: IO ()
 main = defaultMain $ testGroup "Tests"
-  [ testCase "case 1" $ runTest "Case1.hs"
-  , testCase "case 2" $ runTest "Case2.hs"
-  , testCase "case 3" $ runTest "Case3.hs"
-  , testCase "case 4" $ runTest "Case4.hs"
+  [ testGroup "case"
+    [ testCase "1" $ runTest "Case1.hs"
+    , testCase "2" $ runTest "Case2.hs"
+    , testCase "3" $ runTest "Case3.hs"
+    , testCase "4" $ runTest "Case4.hs"
+    ]
+  , testGroup "lambda case"
+    [ testCase "1" $ runTest "LambdaCase1.hs"
+    ]
+  , testGroup "lambda cases"
+    [ testCase "1" $ runTest "LambdaCases1.hs"
+    , testCase "2" $ runTest "LambdaCases2.hs"
+    ]
   ]
 
 testModulePath :: String -> FilePath

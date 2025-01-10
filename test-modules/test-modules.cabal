@@ -8,6 +8,7 @@ common attrs
                       casex
     hs-source-dirs:   .
     default-language: GHC2021
+    default-extensions: LambdaCase
 
 executable Case1
     import: attrs
@@ -24,3 +25,15 @@ executable Case3
 executable Case4
     import: attrs
     main-is: Case4.hs
+
+executable LambdaCase1
+    import: attrs
+    main-is: LambdaCase1.hs
+
+executable LambdaCases1
+    import: attrs
+    main-is: LambdaCases1.hs
+
+executable LambdaCases2
+    import: attrs
+    main-is: LambdaCases2.hs
