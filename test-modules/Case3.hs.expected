@@ -11,6 +11,5 @@ test x y = case x of
       False -> False
       True -> False
   -- 2
-  Just False -> True
-  Just True -> True
+  Just _ -> True
   -- 3

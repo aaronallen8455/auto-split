@@ -1,0 +1,9 @@
+module Case4 where
+
+main :: IO ()
+main = pure ()
+
+test :: Bool -> Bool
+test x = --test
+ case x of
+  SPLIT -> False

@@ -11,6 +11,7 @@ main = defaultMain $ testGroup "Tests"
   [ testCase "case 1" $ runTest "Case1.hs"
   , testCase "case 2" $ runTest "Case2.hs"
   , testCase "case 3" $ runTest "Case3.hs"
+  , testCase "case 4" $ runTest "Case4.hs"
   ]
 
 testModulePath :: String -> FilePath

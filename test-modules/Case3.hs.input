@@ -5,7 +5,10 @@ main = pure ()
 
 test :: Maybe Bool -> Bool -> Bool
 test x y = case x of
+  -- 1
   Nothing ->
     case y of
       SPLIT -> False
+  -- 2
   Just _ -> True
+  -- 3

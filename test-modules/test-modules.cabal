@@ -20,3 +20,7 @@ executable Case2
 executable Case3
     import: attrs
     main-is: Case3.hs
+
+executable Case4
+    import: attrs
+    main-is: Case4.hs

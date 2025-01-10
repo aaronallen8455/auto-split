@@ -9,6 +9,7 @@ module CaseX
 import           Control.Exception
 import           Control.Monad
 import qualified Control.Monad.Trans.Writer.CPS as Writer
+import qualified Data.Char as Char
 import           Data.Foldable
 import           Data.Functor
 import qualified Data.Generics as Syb
@@ -21,10 +22,9 @@ import           Data.String (IsString, fromString)
 import qualified GHC.Data.EnumSet as EnumSet
 import qualified GHC.Paths as Paths
 import qualified Language.Haskell.GHC.ExactPrint as EP
+import           Text.Read (readMaybe)
 
 import qualified CaseX.GhcFacade as Ghc
-
-import           Debug.Trace
 
 -- | Used to induce the incomplete patterns warning from GHC
 pattern SPLIT :: a
@@ -96,7 +96,9 @@ addDsHook hscEnv = hscEnv
                 case mResult of
                   Just (Right parsedMod) -> do
                     let qualiImps = getQualifiedImports parsedMod
-                    case splitPattern qualiImps missingPatWarns (EP.anchorEof parsedMod) of
+                        ast = EP.makeDeltaAst
+                            $ searchAndMark (Ghc.bagToList missingPatWarns) parsedMod
+                    case splitPattern qualiImps (Ghc.bagToList missingPatWarns) ast of
                       (ps, Any True) ->
                         traverse_ (flip writeFile $ EP.exactPrint ps) mFilePath
                       _ -> pure ()
@@ -121,6 +123,11 @@ data NonExhaustivePattern = NonExhaustivePattern
   , srcCodeLoc :: Ghc.RealSrcSpan
   }
 
+-- | Before applying delta transformation, find the expressions that go with
+-- non exhaustive patterns and mark them with a special comment containing the
+-- index of that pattern. This must be done first because source code locations
+-- are removed by delta transformation.
+-- Problematic if delta moves comments to a different node, hopefully it won't.
 searchAndMark
   :: [NonExhaustivePattern]
   -> Ghc.ParsedSource
@@ -131,32 +138,34 @@ searchAndMark nePats = Syb.everywhere (Syb.mkT goExpr `Syb.extT` goDecl)
   goExpr (Ghc.L ann c@Ghc.HsCase{})
     | Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
     , Just neIdx <- List.findIndex ((caseLoc ==) . srcCodeLoc) nePats
-    , let com :: Ghc.LEpaComment
-          com = Ghc.L (Ghc.EpaSpan Ghc.generatedSrcSpan)
-            (Ghc.EpaComment (Ghc.EpaLineComment (show neIdx)) Ghc.placeholderRealSpan)
-          newComms = case Ghc.comments ann of
-            Ghc.EpaComments cs -> Ghc.EpaComments $ com : cs
-            Ghc.EpaCommentsBalanced cs1 cs2 -> Ghc.EpaCommentsBalanced (com : cs1) cs2
-    = Ghc.L ann { Ghc.comments = newComms } c
-  goExpr (Ghc.L ann l@(Ghc.HsLam x lamType _))
+    = Ghc.L (addIndexComment ann neIdx) c
+  goExpr (Ghc.L ann l@(Ghc.HsLam _ lamType _))
     | lamType /= Ghc.LamSingle
     , Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
     , Just neIdx <- List.findIndex ((caseLoc ==) . srcCodeLoc) nePats
-    , let com :: Ghc.LEpaComment
-          com = Ghc.L (Ghc.EpaSpan Ghc.generatedSrcSpan)
-            (Ghc.EpaComment (Ghc.EpaLineComment (show neIdx)) Ghc.placeholderRealSpan)
-          newComms = case Ghc.comments ann of
-            Ghc.EpaComments cs -> Ghc.EpaComments $ com : cs
-            Ghc.EpaCommentsBalanced cs1 cs2 -> Ghc.EpaCommentsBalanced (com : cs1) cs2
-    = Ghc.L ann { Ghc.comments = newComms } l
+    = Ghc.L (addIndexComment ann neIdx) l
   goExpr x = x
+
   goDecl :: Ghc.LHsDecl Ghc.GhcPs -> Ghc.LHsDecl Ghc.GhcPs
-  goDecl = undefined
+  goDecl (Ghc.L ann f@(Ghc.ValD _ Ghc.FunBind{}))
+    | Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
+    , Just neIdx <- List.findIndex ((caseLoc ==) . srcCodeLoc) nePats
+    = Ghc.L (addIndexComment ann neIdx) f
+  goDecl x = x
+
+  addIndexComment ann neIdx =
+    let com :: Ghc.LEpaComment
+        com = Ghc.L (Ghc.EpaDelta (Ghc.DifferentLine (-1) 0) Ghc.NoComments)
+          (Ghc.EpaComment (Ghc.EpaLineComment (show neIdx)) Ghc.placeholderRealSpan)
+        newComms = case Ghc.comments ann of
+          Ghc.EpaComments cs -> Ghc.EpaComments $ com : cs
+          Ghc.EpaCommentsBalanced cs1 cs2 -> Ghc.EpaCommentsBalanced (com : cs1) cs2
+     in ann { Ghc.comments = newComms }
 
 -- | Finds the target pattern and splits it. Returns the modified source and True if successful.
 splitPattern
   :: M.Map Ghc.ModuleName Ghc.ModuleName
-  -> Ghc.Bag NonExhaustivePattern
+  -> [NonExhaustivePattern]
   -> Ghc.ParsedSource
   -> (Ghc.ParsedSource, Any)
 splitPattern qualiImps nePats ps =
@@ -166,53 +175,43 @@ splitPattern qualiImps nePats ps =
           `Syb.extM` (Writer.writer . goDecl)
         ) ps
   where
+  isIdxComment (Ghc.L _ (Ghc.EpaComment (Ghc.EpaLineComment str) realSpan))
+    = realSpan == Ghc.placeholderRealSpan && all Char.isDigit str
+  isIdxComment _ = False
+
+  extractIdxComment (Ghc.EpaComments comms)
+    | (before, Ghc.L _ (Ghc.EpaComment (Ghc.EpaLineComment str) _) : rest)
+        <- break isIdxComment comms
+    , Just idx <- readMaybe str
+    , let newComments = Ghc.EpaComments $ before ++ rest
+    = Just (idx, newComments)
+  extractIdxComment Ghc.EpaCommentsBalanced{} = Nothing
+  extractIdxComment _ = Nothing
+
   goExpr :: Ghc.LHsExpr Ghc.GhcPs -> (Ghc.LHsExpr Ghc.GhcPs, Any)
-  goExpr expr@(Ghc.L ann (Ghc.HsCase x scrut (Ghc.MG mX (Ghc.L mgAnn origMatches))))
-    | Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
-    , Just nePat <- find ((caseLoc ==) . srcCodeLoc) nePats
-    , Ghc.L _ (Ghc.HsCase _ _ deltaMG@(Ghc.MG mgX (Ghc.L deltaMgAnn matches)))
-        <- EP.makeDeltaAst expr
-    , Just newMG <- splitMG False False 0 nePat (Ghc.MG mgX (Ghc.L mgAnn matches))
-    = -- trace (Ghc.showSDocUnsafe $ Ghc.ppr $ Ghc.comments mgAnn)
-      -- trace (Ghc.showSDocUnsafe $ Ghc.ppr $ Ghc.comments deltaMgAnn)
-      trace (Ghc.showSDocUnsafe $ Ghc.ppr ((\(Ghc.L a _) -> a) <$> matches))
-      trace (Ghc.showSDocUnsafe $ Ghc.ppr $ Ghc.comments mgAnn)
-      trace "SUP"
-      ( Ghc.L ann (Ghc.HsCase x scrut newMG)
+  goExpr (Ghc.L ann (Ghc.HsCase x scrut matchGroup))
+    | Just (neIdx, otherComms) <- extractIdxComment (Ghc.comments ann)
+    , Just nePat <- nePats List.!? neIdx
+    , Just newMG <- splitMG False False 0 nePat matchGroup
+    = ( Ghc.L ann {Ghc.comments = otherComms} (Ghc.HsCase x scrut newMG)
       , Any True
       )
-    | Ghc.L _ (Ghc.HsCase _ _ deltaMG@(Ghc.MG mgX (Ghc.L deltaMgAnn matches)))
-        <- EP.makeDeltaAst expr
-    , let smush x = case x of
-            Ghc.EpaCommentsBalanced a b -> Ghc.EpaComments (a <> b)
-    =
-        ( --trace (Ghc.showSDocUnsafe $ Ghc.ppr ((\(Ghc.L a _) -> a) <$> origMatches))
-          --trace (Ghc.showSDocUnsafe $ Ghc.ppr mgAnn)
-          --trace (Ghc.showSDocUnsafe $ Ghc.ppr deltaMgAnn)
-          trace (Ghc.showSDocUnsafe $ Ghc.ppr ann)
-          Ghc.L ann (Ghc.HsCase x scrut (Ghc.MG mX (Ghc.L deltaMgAnn matches)))
-        , Any False
-        )
-  goExpr expr@(Ghc.L ann (Ghc.HsLam x lamType _))
+  goExpr (Ghc.L ann (Ghc.HsLam x lamType matchGroup@(Ghc.MG _ (Ghc.L matchesAnn _))))
     | lamType /= Ghc.LamSingle
-    , Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
-    , Just nePat <- find ((caseLoc ==) . srcCodeLoc) nePats
-    , Ghc.L _ (Ghc.HsLam _ _ deltaMG@(Ghc.MG _ (Ghc.L matchesAnn _matches)))
-        <- EP.makeDeltaAst expr
-    , Just newMG <- splitMG True False (colDelta matchesAnn) nePat deltaMG
-    = ( Ghc.L ann (Ghc.HsLam x lamType newMG)
+    , Just (neIdx, otherComms) <- extractIdxComment (Ghc.comments ann)
+    , Just nePat <- nePats List.!? neIdx
+    , Just newMG <- splitMG True False (colDelta matchesAnn) nePat matchGroup
+    = ( Ghc.L ann {Ghc.comments = otherComms} (Ghc.HsLam x lamType newMG)
       , Any True
       )
   goExpr expr = (expr, Any False)
 
   goDecl :: Ghc.LHsDecl Ghc.GhcPs -> (Ghc.LHsDecl Ghc.GhcPs, Any)
-  goDecl decl@(Ghc.L ann (Ghc.ValD x (Ghc.FunBind x2 fid _)))
-    | Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
-    , Just nePat <- find ((caseLoc ==) . srcCodeLoc) nePats
-    , Ghc.L _ (Ghc.ValD _ (Ghc.FunBind _ _ deltaMG@(Ghc.MG _ (Ghc.L _ _))))
-        <- EP.makeDeltaAst decl
-    , Just newMG <- splitMG True True 0 nePat deltaMG
-    = ( Ghc.L ann (Ghc.ValD x (Ghc.FunBind x2 fid newMG))
+  goDecl (Ghc.L ann (Ghc.ValD x (Ghc.FunBind x2 fid matchGroup)))
+    | Just (neIdx, otherComms) <- extractIdxComment (Ghc.comments ann)
+    , Just nePat <- nePats List.!? neIdx
+    , Just newMG <- splitMG True True 0 nePat matchGroup
+    = ( Ghc.L ann {Ghc.comments = otherComms} (Ghc.ValD x (Ghc.FunBind x2 fid newMG))
       , Any True
       )
   goDecl decl = (decl, Any False)

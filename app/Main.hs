@@ -10,14 +10,14 @@ import qualified Foo as F
 main :: IO ()
 main = pure ()
 
-test2 :: Maybe Bool -> Bool -> Bool
-test2 x y = case x of
-  Nothing ->
-    case y of
-      SPLIT -> False
-  -- test
-  Just True -> True
-  Just False -> True
+test :: Maybe Bool -> Bool
+test x = --hi
+ case x of
+  -- 1
+  Nothing -> False
+  -- 2
+  Just SPLIT -> True
+  -- 3
 
 -- bar :: F.Foo -> F.Foo -> Bool
 -- bar F.Foo F.Foo = True
