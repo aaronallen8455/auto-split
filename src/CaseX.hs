@@ -93,6 +93,10 @@ addDsHook hscEnv = hscEnv
               (runPhaseOrExistingHook $ Ghc.T_HscPostTc env modSum tcResult warnsWithError mOldHash)
               (\(Ghc.SourceError msgs) -> do
                 let (missingPatWarns, otherWarns) = Ghc.partitionBagWith isMissingPatWarn (Ghc.getMessages msgs)
+                    -- Need to parse the module because GHC removes
+                    -- ParsedResult from ModSummary after the frontend finishes.
+                    -- Use the options from compilation to parse the module, otherwise certain
+                    -- syntax extensions won't parse correctly.
                     dynFlags = Ghc.ms_hspp_opts modSum `Ghc.gopt_set` Ghc.Opt_KeepRawTokenStream
                 mResult <- EP.ghcWrapper Paths.libdir $
                   fmap EP.postParseTransform
@@ -168,6 +172,7 @@ searchAndMark nePats = Syb.everywhere (Syb.mkT goExpr `Syb.extT` goDecl)
      in ann { Ghc.comments = newComms }
 
 -- | Finds the target pattern and splits it. Returns the modified source and True if successful.
+-- Applied post delta transformation.
 splitPattern
   :: M.Map Ghc.ModuleName Ghc.ModuleName
   -> [NonExhaustivePattern]
@@ -221,7 +226,6 @@ splitPattern qualiImps nePats ps =
       )
   goDecl decl = (decl, Any False)
 
-  -- Should be applied after the delta transformation
   splitMG multiplePats offsetFirstPat colOffset nePat (Ghc.MG x2 (Ghc.L ann2 matches))
     | (beforeSplit, Ghc.L splitAnn (Ghc.Match _ ctx _ rhs) : afterSplit)
         <- break matchHasSplit matches
@@ -240,19 +244,7 @@ splitPattern qualiImps nePats ps =
                           (patternIds nePat)
             [ Ghc.L splitAnn $ Ghc.Match [] ctx pats rhs ]
           newMatchGroup = beforeSplit ++ newMatches ++ filter (not . matchHasSplit) afterSplit
-          -- The same comment can appear in both the matches annotation and the
-          -- annotation of individual matches. Remove from the outer annotation
-          -- if so.
-          removeDupeComments (Ghc.EpAnn d a (Ghc.EpaComments comments)) =
-            let isDupe (Ghc.L _ comment) = or $ do
-                  Ghc.L (Ghc.EpAnn _ _ (Ghc.EpaComments coms)) _ <- matches
-                  Ghc.L _ com <- coms
-                  [ Ghc.ac_prior_tok comment == Ghc.ac_prior_tok com ]
-
-                newComments = filter (not . isDupe) comments
-             in Ghc.EpAnn d a (Ghc.EpaComments newComments)
-          removeDupeComments x = x
-    = Just $ Ghc.MG x2 (Ghc.L (removeDupeComments ann2) newMatchGroup)
+    = Just $ Ghc.MG x2 (Ghc.L ann2 newMatchGroup)
     | otherwise = Nothing
 
 colDelta :: Ghc.EpAnn ann -> Int

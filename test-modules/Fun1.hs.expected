@@ -1,0 +1,11 @@
+module LambdaCase1 where
+
+import qualified Import as I
+
+main :: IO ()
+main = pure ()
+
+test :: I.Foo -> Bool
+test I.Foo = True
+test I.Bar = True
+test I.Baz = True

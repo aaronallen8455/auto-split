@@ -37,3 +37,8 @@ executable LambdaCases1
 executable LambdaCases2
     import: attrs
     main-is: LambdaCases2.hs
+
+executable Fun1
+    import: attrs
+    main-is: Fun1.hs
+    other-modules: Import
