@@ -1,5 +1,16 @@
+{-# LANGUAGE CPP #-}
 module CaseX.GhcFacade
   ( module Ghc
+  , mkParPat'
+  , anchorD0
+  , anchorD1
+  , nameAnchorD0
+  , nameAnchorD1
+  , colDelta
+  , nextLine
+  , getComments
+  , setComments
+  , fakeCommentLocation
   ) where
 
 import           GHC as Ghc (ParsedSource)
@@ -32,3 +43,147 @@ import           GHC.Unit.Types as Ghc
 import           GHC.Utils.Error as Ghc
 import           GHC.Utils.Outputable as Ghc
 import           Language.Haskell.Syntax.Basic as Ghc
+
+#if !MIN_VERSION_ghc(9,10,0)
+import           Data.Maybe
+#endif
+import qualified Language.Haskell.GHC.ExactPrint as EP
+
+mkParPat' :: Ghc.LPat Ghc.GhcPs -> Ghc.Pat Ghc.GhcPs
+#if MIN_VERSION_ghc(9,10,0)
+mkParPat' inner = Ghc.ParPat (Ghc.EpTok EP.d0, Ghc.EpTok EP.d0) inner
+#elif MIN_VERSION_ghc(9,8,0)
+mkParPat' inner = Ghc.ParPat Ghc.noAnn (Ghc.L (Ghc.TokenLoc EP.d0) Ghc.HsTok) inner (Ghc.L (Ghc.TokenLoc EP.d0) Ghc.HsTok)
+#endif
+
+anchorD0
+#if MIN_VERSION_ghc(9,10,0)
+  :: Ghc.NoAnn ann => Ghc.EpAnn ann
+anchorD0 = Ghc.EpAnn EP.d0 Ghc.noAnn Ghc.emptyComments
+#elif MIN_VERSION_ghc(9,8,0)
+  :: Ghc.SrcSpanAnnA
+anchorD0 =
+  Ghc.SrcSpanAnn
+    (Ghc.EpAnn
+      (Ghc.Anchor Ghc.placeholderRealSpan (Ghc.MovedAnchor (Ghc.SameLine 0)))
+      mempty
+      Ghc.emptyComments
+    )
+    Ghc.generatedSrcSpan
+#endif
+
+anchorD1
+#if MIN_VERSION_ghc(9,10,0)
+  :: Ghc.NoAnn ann => Ghc.EpAnn ann
+anchorD1 = Ghc.EpAnn EP.d1 Ghc.noAnn Ghc.emptyComments
+#elif MIN_VERSION_ghc(9,8,0)
+  :: Ghc.SrcSpanAnnA
+anchorD1 =
+  Ghc.SrcSpanAnn
+    (Ghc.EpAnn
+      (Ghc.Anchor Ghc.placeholderRealSpan (Ghc.MovedAnchor (Ghc.SameLine 1)))
+      mempty
+      Ghc.emptyComments
+    )
+    Ghc.generatedSrcSpan
+#endif
+
+nameAnchorD0
+#if MIN_VERSION_ghc(9,10,0)
+  :: Ghc.NoAnn ann => Ghc.EpAnn ann
+nameAnchorD0 = Ghc.EpAnn EP.d0 Ghc.noAnn Ghc.emptyComments
+#elif MIN_VERSION_ghc(9,8,0)
+  :: Ghc.SrcSpanAnnN
+nameAnchorD0 =
+  Ghc.SrcSpanAnn
+    (Ghc.EpAnn
+      (Ghc.Anchor Ghc.placeholderRealSpan (Ghc.MovedAnchor (Ghc.SameLine 0)))
+      mempty
+      Ghc.emptyComments
+    )
+    Ghc.generatedSrcSpan --Ghc.Anchor Ghc.placeholderRealSpan (Ghc.MovedAnchor (Ghc.SameLine 0))
+#endif
+
+nameAnchorD1
+#if MIN_VERSION_ghc(9,10,0)
+  :: Ghc.NoAnn ann => Ghc.EpAnn ann
+nameAnchorD1 = Ghc.EpAnn EP.d1 Ghc.noAnn Ghc.emptyComments
+#elif MIN_VERSION_ghc(9,8,0)
+  :: Ghc.SrcSpanAnnN
+nameAnchorD1 =
+  Ghc.SrcSpanAnn
+    (Ghc.EpAnn
+      (Ghc.Anchor Ghc.placeholderRealSpan (Ghc.MovedAnchor (Ghc.SameLine 1)))
+      mempty
+      Ghc.emptyComments
+    )
+    Ghc.generatedSrcSpan --Ghc.Anchor Ghc.placeholderRealSpan (Ghc.MovedAnchor (Ghc.SameLine 0))
+#endif
+
+nextLine
+  :: Int
+#if MIN_VERSION_ghc(9,10,0)
+  -> Ghc.NoAnn ann => Ghc.EpAnn ann
+nextLine colOffset =
+  Ghc.EpAnn (Ghc.EpaDelta (Ghc.DifferentLine 1 colOffset) []) Ghc.noAnn Ghc.emptyComments
+#elif MIN_VERSION_ghc(9,8,0)
+  -> Ghc.SrcSpanAnnA
+nextLine colOffset =
+  Ghc.SrcSpanAnn
+    (Ghc.EpAnn
+      (Ghc.Anchor Ghc.placeholderRealSpan (Ghc.MovedAnchor (Ghc.DifferentLine 1 colOffset)))
+      mempty
+      Ghc.emptyComments
+    )
+    Ghc.generatedSrcSpan --Ghc.Anchor Ghc.placeholderRealSpan (Ghc.MovedAnchor (Ghc.SameLine 0))
+#endif
+
+#if MIN_VERSION_ghc(9,10,0)
+colDelta :: Ghc.EpAnn ann -> Int
+colDelta (Ghc.EpAnn (Ghc.EpaDelta delta _) _ _)
+#elif MIN_VERSION_ghc(9,8,0)
+colDelta :: Ghc.SrcSpanAnn' (Ghc.EpAnn ann) -> Int
+colDelta (Ghc.SrcSpanAnn (Ghc.EpAnn (Ghc.Anchor _ (Ghc.MovedAnchor delta)) _ _) _)
+#endif
+  = case delta of
+    Ghc.DifferentLine _ c -> c
+    Ghc.SameLine c -> c
+colDelta _ = 0
+
+#if MIN_VERSION_ghc(9,10,0)
+getComments :: Ghc.EpAnn ann -> Ghc.EpAnnComments
+getComments = Ghc.comments
+#elif MIN_VERSION_ghc(9,8,0)
+getComments :: Ghc.SrcSpanAnn' (Ghc.EpAnn ann) -> Ghc.EpAnnComments
+getComments a = case Ghc.ann a of
+                  Ghc.EpAnnNotUsed -> Ghc.emptyComments
+                  epAn -> Ghc.comments epAn
+#endif
+
+#if MIN_VERSION_ghc(9,10,0)
+setComments :: Ghc.EpAnnComments -> () -> Ghc.EpAnn ann -> Ghc.EpAnn ann
+setComments comms () a = a {Ghc.comments = comms}
+#elif MIN_VERSION_ghc(9,8,0)
+setComments :: Ghc.EpAnnComments -> ann -> Ghc.SrcSpanAnn' (Ghc.EpAnn ann) -> Ghc.SrcSpanAnn' (Ghc.EpAnn ann)
+setComments comms defAnn a =
+  case Ghc.ann a of
+    Ghc.EpAnnNotUsed ->
+      a { Ghc.ann = Ghc.EpAnn
+            (Ghc.Anchor
+              (fromMaybe Ghc.placeholderRealSpan . Ghc.srcSpanToRealSrcSpan $ Ghc.locA a)
+              Ghc.UnchangedAnchor
+            ) defAnn comms
+        }
+    _ -> a {Ghc.ann = (Ghc.ann a) {Ghc.comments = comms}}
+#endif
+
+-- | A location used for the comments that are inserted for targeted elements.
+-- By using a negative column delta, the layout is not affected.
+fakeCommentLocation
+#if MIN_VERSION_ghc(9,10,0)
+  :: Ghc.NoCommentsLocation
+fakeCommentLocation = Ghc.EpaDelta (Ghc.DifferentLine (-1) 0) Ghc.NoComments
+#elif MIN_VERSION_ghc(9,8,0)
+  :: Ghc.Anchor
+fakeCommentLocation = Ghc.Anchor Ghc.placeholderRealSpan (Ghc.MovedAnchor (Ghc.DifferentLine (-1) 0))
+#endif

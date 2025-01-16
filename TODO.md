@@ -5,3 +5,4 @@
   patterns that contain it.
 - Use list pattern
 - Support case brace syntax
+- Auto import should only have SPLIT

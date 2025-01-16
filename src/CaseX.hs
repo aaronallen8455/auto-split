@@ -1,6 +1,7 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE CPP #-}
 module CaseX
   ( pattern SPLIT
   , plugin
@@ -148,11 +149,18 @@ searchAndMark nePats = Syb.everywhere (Syb.mkT goExpr `Syb.extT` goDecl)
     | Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
     , Just neIdx <- List.findIndex ((caseLoc ==) . srcCodeLoc) nePats
     = Ghc.L (addIndexComment ann neIdx) c
+#if MIN_VERSION_ghc(9,10,0)
   goExpr (Ghc.L ann l@(Ghc.HsLam _ lamType _))
     | lamType /= Ghc.LamSingle
     , Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
     , Just neIdx <- List.findIndex ((caseLoc ==) . srcCodeLoc) nePats
     = Ghc.L (addIndexComment ann neIdx) l
+#elif MIN_VERSION_ghc(9,8,0)
+  goExpr (Ghc.L ann l@(Ghc.HsLamCase _ _ _))
+    | Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
+    , Just neIdx <- List.findIndex ((caseLoc ==) . srcCodeLoc) nePats
+    = Ghc.L (addIndexComment ann neIdx) l
+#endif
   goExpr x = x
 
   goDecl :: Ghc.LHsDecl Ghc.GhcPs -> Ghc.LHsDecl Ghc.GhcPs
@@ -164,12 +172,12 @@ searchAndMark nePats = Syb.everywhere (Syb.mkT goExpr `Syb.extT` goDecl)
 
   addIndexComment ann neIdx =
     let com :: Ghc.LEpaComment
-        com = Ghc.L (Ghc.EpaDelta (Ghc.DifferentLine (-1) 0) Ghc.NoComments)
+        com = Ghc.L Ghc.fakeCommentLocation
           (Ghc.EpaComment (Ghc.EpaLineComment (show neIdx)) Ghc.placeholderRealSpan)
-        newComms = case Ghc.comments ann of
+        newComms = case Ghc.getComments ann of
           Ghc.EpaComments cs -> Ghc.EpaComments $ com : cs
           Ghc.EpaCommentsBalanced cs1 cs2 -> Ghc.EpaCommentsBalanced (com : cs1) cs2
-     in ann { Ghc.comments = newComms }
+     in Ghc.setComments newComms mempty ann
 
 -- | Finds the target pattern and splits it. Returns the modified source and True if successful.
 -- Applied post delta transformation.
@@ -200,28 +208,38 @@ splitPattern qualiImps nePats ps =
 
   goExpr :: Ghc.LHsExpr Ghc.GhcPs -> (Ghc.LHsExpr Ghc.GhcPs, Any)
   goExpr (Ghc.L ann (Ghc.HsCase x scrut matchGroup))
-    | Just (neIdx, otherComms) <- extractIdxComment (Ghc.comments ann)
+    | Just (neIdx, otherComms) <- extractIdxComment (Ghc.getComments ann)
     , Just nePat <- nePats List.!? neIdx
     , Just newMG <- splitMG False False 0 nePat matchGroup
-    = ( Ghc.L ann {Ghc.comments = otherComms} (Ghc.HsCase x scrut newMG)
+    = ( Ghc.L (Ghc.setComments otherComms mempty ann) (Ghc.HsCase x scrut newMG)
       , Any True
       )
+#if MIN_VERSION_ghc(9,10,0)
   goExpr (Ghc.L ann (Ghc.HsLam x lamType matchGroup@(Ghc.MG _ (Ghc.L matchesAnn _))))
     | lamType /= Ghc.LamSingle
     , Just (neIdx, otherComms) <- extractIdxComment (Ghc.comments ann)
     , Just nePat <- nePats List.!? neIdx
-    , Just newMG <- splitMG True False (colDelta matchesAnn) nePat matchGroup
+    , Just newMG <- splitMG True False (Ghc.colDelta matchesAnn) nePat matchGroup
     = ( Ghc.L ann {Ghc.comments = otherComms} (Ghc.HsLam x lamType newMG)
       , Any True
       )
+#elif MIN_VERSION_ghc(9,8,0)
+  goExpr (Ghc.L ann (Ghc.HsLamCase x lamType matchGroup@(Ghc.MG _ (Ghc.L matchesAnn _))))
+    | Just (neIdx, otherComms) <- extractIdxComment (Ghc.getComments ann)
+    , Just nePat <- nePats List.!? neIdx
+    , Just newMG <- splitMG True False (Ghc.colDelta matchesAnn) nePat matchGroup
+    = ( Ghc.L (Ghc.setComments otherComms mempty ann) (Ghc.HsLamCase x lamType newMG)
+      , Any True
+      )
+#endif
   goExpr expr = (expr, Any False)
 
   goDecl :: Ghc.LHsDecl Ghc.GhcPs -> (Ghc.LHsDecl Ghc.GhcPs, Any)
   goDecl (Ghc.L ann (Ghc.ValD x (Ghc.FunBind x2 fid matchGroup)))
-    | Just (neIdx, otherComms) <- extractIdxComment (Ghc.comments ann)
+    | Just (neIdx, otherComms) <- extractIdxComment (Ghc.getComments ann)
     , Just nePat <- nePats List.!? neIdx
     , Just newMG <- splitMG True True 0 nePat matchGroup
-    = ( Ghc.L ann {Ghc.comments = otherComms} (Ghc.ValD x (Ghc.FunBind x2 fid newMG))
+    = ( Ghc.L (Ghc.setComments otherComms mempty ann) (Ghc.ValD x (Ghc.FunBind x2 fid newMG))
       , Any True
       )
   goDecl decl = (decl, Any False)
@@ -234,7 +252,7 @@ splitPattern qualiImps nePats ps =
           correctDeltas [] = []
           correctDeltas (x : xs) =
             x :
-              (Ghc.L (Ghc.EpAnn (Ghc.EpaDelta (Ghc.DifferentLine 1 colOffset) []) Ghc.noAnn Ghc.emptyComments) . Ghc.unLoc
+              (Ghc.L (Ghc.nextLine colOffset) . Ghc.unLoc
                <$> xs)
           newMatches = correctDeltas $ do
             nabla <- patternNablas nePat
@@ -242,22 +260,16 @@ splitPattern qualiImps nePats ps =
                   zipWith (mkPat qualiImps nabla $ not multiplePats)
                           (offsetFirstPat : repeat True)
                           (patternIds nePat)
-            [ Ghc.L splitAnn $ Ghc.Match [] ctx pats rhs ]
+            [ Ghc.L splitAnn $ Ghc.Match Ghc.noAnn ctx pats rhs ]
           newMatchGroup = beforeSplit ++ newMatches ++ filter (not . matchHasSplit) afterSplit
     = Just $ Ghc.MG x2 (Ghc.L ann2 newMatchGroup)
     | otherwise = Nothing
-
-colDelta :: Ghc.EpAnn ann -> Int
-colDelta (Ghc.EpAnn (Ghc.EpaDelta delta _) _ _) = case delta of
-  Ghc.DifferentLine _ c -> c
-  Ghc.SameLine c -> c
-colDelta _ = 0
 
 matchHasSplit :: Ghc.LMatch Ghc.GhcPs (Ghc.LHsExpr Ghc.GhcPs) -> Bool
 matchHasSplit (Ghc.L _ (Ghc.Match _ _ pats _)) = Syb.everything (||) (Syb.mkQ False isSplitCon) pats
   where
   isSplitCon :: Ghc.Pat Ghc.GhcPs -> Bool
-  isSplitCon (Ghc.ConPat [] (Ghc.L _ rdr) _) =
+  isSplitCon (Ghc.ConPat _ (Ghc.L _ rdr) _) =
     Ghc.rdrNameOcc rdr == Ghc.mkDataOcc splitName
   isSplitCon _ = False
 
@@ -269,14 +281,15 @@ mkPat
   -> Bool -- ^ True => needs left padding due separate it from another pattern
   -> Ghc.Id
   -> Ghc.LPat Ghc.GhcPs
-mkPat qualiImps nabla isOutermost needsLeftPad x = Ghc.L (Ghc.EpAnn delta Ghc.noAnn Ghc.emptyComments) $
+mkPat qualiImps nabla isOutermost needsLeftPad x = Ghc.L delta $
   case Ghc.lookupSolution nabla x of
     Nothing -> Ghc.WildPat Ghc.noExtField
     Just (Ghc.PACA (Ghc.PmAltConLike con) _tvs args) -> paren args $
       case Ghc.conLikeIsInfix con of
         True | [arg1, arg2] <- args ->
-          Ghc.ConPat []
-            ( Ghc.L (Ghc.EpAnn EP.d1 Ghc.noAnn Ghc.emptyComments)
+          Ghc.ConPat Ghc.noAnn
+            -- []
+            ( Ghc.L Ghc.nameAnchorD1
             . nameToRdrName qualiImps
             $ Ghc.conLikeName con
             )
@@ -284,47 +297,50 @@ mkPat qualiImps nabla isOutermost needsLeftPad x = Ghc.L (Ghc.EpAnn delta Ghc.no
                          (mkPat qualiImps nabla False True arg2)
         _ | Ghc.RealDataCon dc <- con
           , Ghc.isUnboxedTupleDataCon dc
-          -> Ghc.TuplePat
-               [ Ghc.AddEpAnn Ghc.AnnOpenPH EP.d0
-               , Ghc.AddEpAnn Ghc.AnnClosePH EP.d0
-               ]
+          -> Ghc.TuplePat Ghc.noAnn
+--                [ Ghc.AddEpAnn Ghc.AnnOpenPH EP.d0
+--                , Ghc.AddEpAnn Ghc.AnnClosePH EP.d0
+--                ]
                (addCommaAnns $ zipWith (mkPat qualiImps nabla True) (False : repeat True) args)
                Ghc.Unboxed
         _ | Ghc.RealDataCon dc <- con
           , Ghc.isTupleDataCon dc
-          -> Ghc.TuplePat
-               [ Ghc.AddEpAnn Ghc.AnnOpenP EP.d0
-               , Ghc.AddEpAnn Ghc.AnnCloseP EP.d0
-               ]
+          -> Ghc.TuplePat Ghc.noAnn
+--                [ Ghc.AddEpAnn Ghc.AnnOpenP EP.d0
+--                , Ghc.AddEpAnn Ghc.AnnCloseP EP.d0
+--                ]
                (addCommaAnns $ zipWith (mkPat qualiImps nabla True) (False : repeat True) args)
                Ghc.Boxed
         _ ->
           -- If GHC tries to use SPLIT as a missing pattern, replace it with wildcard
           if Ghc.occName (Ghc.conLikeName con) == Ghc.mkDataOcc splitName
           then Ghc.WildPat Ghc.noExtField
-          else Ghc.ConPat [] ( Ghc.L (Ghc.EpAnn EP.d0 Ghc.noAnn Ghc.emptyComments)
-                             . nameToRdrName qualiImps $ Ghc.conLikeName con
-                             )
+          else Ghc.ConPat Ghc.noAnn
+                ( Ghc.L Ghc.nameAnchorD0
+                . nameToRdrName qualiImps $ Ghc.conLikeName con
+                )
              $ Ghc.PrefixCon [] (mkPat qualiImps nabla False True <$> args)
     Just (Ghc.PACA (Ghc.PmAltLit lit) _tvs _args) ->
       case Ghc.pm_lit_val lit of
         Ghc.PmLitInt integer ->
-          Ghc.NPat [] (Ghc.noLocA $ Ghc.OverLit Ghc.noExtField $ Ghc.HsIntegral $ Ghc.IL (Ghc.SourceText . fromString $ show integer) (integer < 0) integer) Nothing Ghc.noExtField
+          Ghc.NPat Ghc.noAnn (Ghc.noLocA $ Ghc.OverLit Ghc.noExtField $ Ghc.HsIntegral $ Ghc.IL (Ghc.SourceText . fromString $ show integer) (integer < 0) integer) Nothing Ghc.noExtField
         Ghc.PmLitRat rational ->
-          Ghc.NPat [] (Ghc.noLocA $ Ghc.OverLit Ghc.noExtField $ Ghc.HsFractional $ Ghc.mkTHFractionalLit rational) Nothing Ghc.noExtField
+          Ghc.NPat Ghc.noAnn (Ghc.noLocA $ Ghc.OverLit Ghc.noExtField $ Ghc.HsFractional $ Ghc.mkTHFractionalLit rational) Nothing Ghc.noExtField
         Ghc.PmLitChar char -> Ghc.LitPat Ghc.noExtField $ Ghc.HsChar Ghc.NoSourceText char
         Ghc.PmLitString fastString -> Ghc.LitPat Ghc.noExtField $ Ghc.HsString Ghc.NoSourceText fastString
         Ghc.PmLitOverInt _minuses integer ->
-          Ghc.NPat [] (Ghc.noLocA $ Ghc.OverLit Ghc.noExtField $ Ghc.HsIntegral $ Ghc.IL (Ghc.SourceText . fromString $ show integer) (integer < 0) integer) Nothing Ghc.noExtField
+          Ghc.NPat Ghc.noAnn (Ghc.noLocA $ Ghc.OverLit Ghc.noExtField $ Ghc.HsIntegral $ Ghc.IL (Ghc.SourceText . fromString $ show integer) (integer < 0) integer) Nothing Ghc.noExtField
         Ghc.PmLitOverRat _minuses fractionalLit ->
-          Ghc.NPat [] (Ghc.noLocA $ Ghc.OverLit Ghc.noExtField $ Ghc.HsFractional fractionalLit) Nothing Ghc.noExtField
+          Ghc.NPat Ghc.noAnn (Ghc.noLocA $ Ghc.OverLit Ghc.noExtField $ Ghc.HsFractional fractionalLit) Nothing Ghc.noExtField
         Ghc.PmLitOverString fastString -> Ghc.LitPat Ghc.noExtField $ Ghc.HsString Ghc.NoSourceText fastString
   where
-    delta = if needsLeftPad then EP.d1 else EP.d0
+    delta = if needsLeftPad
+               then Ghc.anchorD1
+               else Ghc.anchorD0
     paren [] inner = inner
     paren _ inner =
       if not isOutermost
-      then Ghc.ParPat (Ghc.EpTok EP.d0, Ghc.EpTok EP.d0) (Ghc.L (Ghc.EpAnn EP.d0 Ghc.noAnn Ghc.emptyComments) inner)
+      then Ghc.mkParPat' (Ghc.L Ghc.anchorD0 inner)
       else inner
     addCommaAnns [] = []
     addCommaAnns [a] = [a]
