@@ -80,7 +80,7 @@ addDsHook hscEnv = hscEnv
       case tPhase of
         Ghc.T_HscPostTc env modSum tcResult@(Ghc.FrontendTypecheck gblEnv) warns mOldHash -> do
           usedGres <- readIORef $ Ghc.tcg_used_gres gblEnv
-          let usesSplit = any ((== splitName) . Ghc.getOccFS . Ghc.gre_name) usedGres
+          let usesSplit = any ((== splitName) . Ghc.occNameFS . Ghc.occName . Ghc.gre_name) usedGres
               mFilePath = Ghc.ml_hs_file (Ghc.ms_location modSum)
           if not usesSplit
           then runPhaseOrExistingHook tPhase
@@ -126,6 +126,9 @@ instance Ghc.Diagnostic PatternSplitDiag where
   diagnosticReason _ = Ghc.ErrorWithoutFlag
   diagnosticHints _ = []
   diagnosticCode _ = Nothing
+#if !MIN_VERSION_ghc(9,8,0)
+  defaultDiagnosticOpts = Ghc.NoDiagnosticOpts
+#endif
 
 data NonExhaustivePattern = NonExhaustivePattern
   { patternIds :: [Ghc.Id]
@@ -155,7 +158,7 @@ searchAndMark nePats = Syb.everywhere (Syb.mkT goExpr `Syb.extT` goDecl)
     , Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
     , Just neIdx <- List.findIndex ((caseLoc ==) . srcCodeLoc) nePats
     = Ghc.L (addIndexComment ann neIdx) l
-#elif MIN_VERSION_ghc(9,8,0)
+#elif MIN_VERSION_ghc(9,6,0)
   goExpr (Ghc.L ann l@(Ghc.HsLamCase _ _ _))
     | Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
     , Just neIdx <- List.findIndex ((caseLoc ==) . srcCodeLoc) nePats
@@ -209,7 +212,7 @@ splitPattern qualiImps nePats ps =
   goExpr :: Ghc.LHsExpr Ghc.GhcPs -> (Ghc.LHsExpr Ghc.GhcPs, Any)
   goExpr (Ghc.L ann (Ghc.HsCase x scrut matchGroup))
     | Just (neIdx, otherComms) <- extractIdxComment (Ghc.getComments ann)
-    , Just nePat <- nePats List.!? neIdx
+    , Just nePat <- listToMaybe $ drop neIdx nePats
     , Just newMG <- splitMG False False 0 nePat matchGroup
     = ( Ghc.L (Ghc.setComments otherComms mempty ann) (Ghc.HsCase x scrut newMG)
       , Any True
@@ -223,10 +226,10 @@ splitPattern qualiImps nePats ps =
     = ( Ghc.L ann {Ghc.comments = otherComms} (Ghc.HsLam x lamType newMG)
       , Any True
       )
-#elif MIN_VERSION_ghc(9,8,0)
+#elif MIN_VERSION_ghc(9,6,0)
   goExpr (Ghc.L ann (Ghc.HsLamCase x lamType matchGroup@(Ghc.MG _ (Ghc.L matchesAnn _))))
     | Just (neIdx, otherComms) <- extractIdxComment (Ghc.getComments ann)
-    , Just nePat <- nePats List.!? neIdx
+    , Just nePat <- listToMaybe $ drop neIdx nePats
     , Just newMG <- splitMG True False (Ghc.colDelta matchesAnn) nePat matchGroup
     = ( Ghc.L (Ghc.setComments otherComms mempty ann) (Ghc.HsLamCase x lamType newMG)
       , Any True
@@ -237,7 +240,7 @@ splitPattern qualiImps nePats ps =
   goDecl :: Ghc.LHsDecl Ghc.GhcPs -> (Ghc.LHsDecl Ghc.GhcPs, Any)
   goDecl (Ghc.L ann (Ghc.ValD x (Ghc.FunBind x2 fid matchGroup)))
     | Just (neIdx, otherComms) <- extractIdxComment (Ghc.getComments ann)
-    , Just nePat <- nePats List.!? neIdx
+    , Just nePat <- listToMaybe $ drop neIdx nePats
     , Just newMG <- splitMG True True 0 nePat matchGroup
     = ( Ghc.L (Ghc.setComments otherComms mempty ann) (Ghc.ValD x (Ghc.FunBind x2 fid newMG))
       , Any True
@@ -368,6 +371,7 @@ addImport result = result
 removeUnusedImportWarn :: Ghc.TcM ()
 removeUnusedImportWarn = do
   errsVar <- Ghc.getErrsVar
+#if MIN_VERSION_ghc(9,8,0)
   let isCaseXImportWarn msgEnv =
         case Ghc.errMsgDiagnostic msgEnv of
           Ghc.TcRnMessageWithInfo _ (Ghc.TcRnMessageDetailed _ (Ghc.TcRnUnusedImport decl _)) ->
@@ -375,6 +379,20 @@ removeUnusedImportWarn = do
           _ -> False
   Ghc.liftIO . modifyIORef errsVar $
     Ghc.mkMessages . Ghc.filterBag (not . isCaseXImportWarn) . Ghc.getMessages
+#else
+  -- 9.6 lacks the specific diagnostic
+  let isCaseXImportWarn msgEnv =
+        case Ghc.errMsgDiagnostic msgEnv of
+          Ghc.TcRnMessageWithInfo _ (Ghc.TcRnMessageDetailed _ (Ghc.TcRnUnknownMessage (Ghc.UnknownDiagnostic diag)))
+            | Ghc.WarningWithFlag Ghc.Opt_WarnUnusedImports <- Ghc.diagnosticReason diag
+            -> True
+          _ -> False
+  Ghc.liftIO . modifyIORef errsVar $ \msgs ->
+    -- the target import warning always shows up as the last occurrence
+    case break isCaseXImportWarn . reverse . Ghc.bagToList $ Ghc.getMessages msgs of
+      (before, _ : after) -> Ghc.mkMessages . Ghc.listToBag . reverse $ before ++ after
+      _ -> msgs
+#endif
 
 -- | It is necessary to track what modules are imported qualified so that
 -- constructors in generated patterns can be correctly qualified.

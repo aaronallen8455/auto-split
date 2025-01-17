@@ -13,11 +13,18 @@ module CaseX.GhcFacade
   , fakeCommentLocation
   ) where
 
+#if MIN_VERSION_ghc(9,8,0)
+import           GHC.Driver.DynFlags as Ghc
+import           GHC.Types.Var as Ghc
+#else
+import           GHC.Driver.Flags as Ghc
+import           GHC.Types.Var as Ghc hiding (varName)
+import           GHC.Driver.Session as Ghc
+#endif
 import           GHC as Ghc (ParsedSource)
 import           GHC.Core.ConLike as Ghc
 import           GHC.Core.DataCon as Ghc
 import           GHC.Data.Bag as Ghc
-import           GHC.Driver.DynFlags as Ghc
 import           GHC.Driver.Env as Ghc
 import           GHC.Driver.Errors.Types as Ghc
 import           GHC.Driver.Hooks as Ghc
@@ -36,7 +43,6 @@ import           GHC.Types.Name.Reader as Ghc
 import           GHC.Types.SourceError as Ghc
 import           GHC.Types.SourceText as Ghc
 import           GHC.Types.SrcLoc as Ghc
-import           GHC.Types.Var as Ghc
 import           GHC.Unit.Module.Location as Ghc
 import           GHC.Unit.Module.ModSummary as Ghc
 import           GHC.Unit.Types as Ghc
@@ -52,7 +58,7 @@ import qualified Language.Haskell.GHC.ExactPrint as EP
 mkParPat' :: Ghc.LPat Ghc.GhcPs -> Ghc.Pat Ghc.GhcPs
 #if MIN_VERSION_ghc(9,10,0)
 mkParPat' inner = Ghc.ParPat (Ghc.EpTok EP.d0, Ghc.EpTok EP.d0) inner
-#elif MIN_VERSION_ghc(9,8,0)
+#elif MIN_VERSION_ghc(9,6,0)
 mkParPat' inner = Ghc.ParPat Ghc.noAnn (Ghc.L (Ghc.TokenLoc EP.d0) Ghc.HsTok) inner (Ghc.L (Ghc.TokenLoc EP.d0) Ghc.HsTok)
 #endif
 
@@ -60,7 +66,7 @@ anchorD0
 #if MIN_VERSION_ghc(9,10,0)
   :: Ghc.NoAnn ann => Ghc.EpAnn ann
 anchorD0 = Ghc.EpAnn EP.d0 Ghc.noAnn Ghc.emptyComments
-#elif MIN_VERSION_ghc(9,8,0)
+#elif MIN_VERSION_ghc(9,6,0)
   :: Ghc.SrcSpanAnnA
 anchorD0 =
   Ghc.SrcSpanAnn
@@ -76,7 +82,7 @@ anchorD1
 #if MIN_VERSION_ghc(9,10,0)
   :: Ghc.NoAnn ann => Ghc.EpAnn ann
 anchorD1 = Ghc.EpAnn EP.d1 Ghc.noAnn Ghc.emptyComments
-#elif MIN_VERSION_ghc(9,8,0)
+#elif MIN_VERSION_ghc(9,6,0)
   :: Ghc.SrcSpanAnnA
 anchorD1 =
   Ghc.SrcSpanAnn
@@ -92,7 +98,7 @@ nameAnchorD0
 #if MIN_VERSION_ghc(9,10,0)
   :: Ghc.NoAnn ann => Ghc.EpAnn ann
 nameAnchorD0 = Ghc.EpAnn EP.d0 Ghc.noAnn Ghc.emptyComments
-#elif MIN_VERSION_ghc(9,8,0)
+#elif MIN_VERSION_ghc(9,6,0)
   :: Ghc.SrcSpanAnnN
 nameAnchorD0 =
   Ghc.SrcSpanAnn
@@ -108,7 +114,7 @@ nameAnchorD1
 #if MIN_VERSION_ghc(9,10,0)
   :: Ghc.NoAnn ann => Ghc.EpAnn ann
 nameAnchorD1 = Ghc.EpAnn EP.d1 Ghc.noAnn Ghc.emptyComments
-#elif MIN_VERSION_ghc(9,8,0)
+#elif MIN_VERSION_ghc(9,6,0)
   :: Ghc.SrcSpanAnnN
 nameAnchorD1 =
   Ghc.SrcSpanAnn
@@ -126,7 +132,7 @@ nextLine
   -> Ghc.NoAnn ann => Ghc.EpAnn ann
 nextLine colOffset =
   Ghc.EpAnn (Ghc.EpaDelta (Ghc.DifferentLine 1 colOffset) []) Ghc.noAnn Ghc.emptyComments
-#elif MIN_VERSION_ghc(9,8,0)
+#elif MIN_VERSION_ghc(9,6,0)
   -> Ghc.SrcSpanAnnA
 nextLine colOffset =
   Ghc.SrcSpanAnn
@@ -141,7 +147,7 @@ nextLine colOffset =
 #if MIN_VERSION_ghc(9,10,0)
 colDelta :: Ghc.EpAnn ann -> Int
 colDelta (Ghc.EpAnn (Ghc.EpaDelta delta _) _ _)
-#elif MIN_VERSION_ghc(9,8,0)
+#elif MIN_VERSION_ghc(9,6,0)
 colDelta :: Ghc.SrcSpanAnn' (Ghc.EpAnn ann) -> Int
 colDelta (Ghc.SrcSpanAnn (Ghc.EpAnn (Ghc.Anchor _ (Ghc.MovedAnchor delta)) _ _) _)
 #endif
@@ -153,7 +159,7 @@ colDelta _ = 0
 #if MIN_VERSION_ghc(9,10,0)
 getComments :: Ghc.EpAnn ann -> Ghc.EpAnnComments
 getComments = Ghc.comments
-#elif MIN_VERSION_ghc(9,8,0)
+#elif MIN_VERSION_ghc(9,6,0)
 getComments :: Ghc.SrcSpanAnn' (Ghc.EpAnn ann) -> Ghc.EpAnnComments
 getComments a = case Ghc.ann a of
                   Ghc.EpAnnNotUsed -> Ghc.emptyComments
@@ -163,7 +169,7 @@ getComments a = case Ghc.ann a of
 #if MIN_VERSION_ghc(9,10,0)
 setComments :: Ghc.EpAnnComments -> () -> Ghc.EpAnn ann -> Ghc.EpAnn ann
 setComments comms () a = a {Ghc.comments = comms}
-#elif MIN_VERSION_ghc(9,8,0)
+#elif MIN_VERSION_ghc(9,6,0)
 setComments :: Ghc.EpAnnComments -> ann -> Ghc.SrcSpanAnn' (Ghc.EpAnn ann) -> Ghc.SrcSpanAnn' (Ghc.EpAnn ann)
 setComments comms defAnn a =
   case Ghc.ann a of
@@ -183,7 +189,7 @@ fakeCommentLocation
 #if MIN_VERSION_ghc(9,10,0)
   :: Ghc.NoCommentsLocation
 fakeCommentLocation = Ghc.EpaDelta (Ghc.DifferentLine (-1) 0) Ghc.NoComments
-#elif MIN_VERSION_ghc(9,8,0)
+#elif MIN_VERSION_ghc(9,6,0)
   :: Ghc.Anchor
 fakeCommentLocation = Ghc.Anchor Ghc.placeholderRealSpan (Ghc.MovedAnchor (Ghc.DifferentLine (-1) 0))
 #endif
