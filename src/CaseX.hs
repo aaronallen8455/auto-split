@@ -291,7 +291,6 @@ mkPat qualiImps nabla isOutermost needsLeftPad x = Ghc.L delta $
       case Ghc.conLikeIsInfix con of
         True | [arg1, arg2] <- args ->
           Ghc.ConPat Ghc.noAnn
-            -- []
             ( Ghc.L Ghc.nameAnchorD1
             . nameToRdrName qualiImps
             $ Ghc.conLikeName con
@@ -300,18 +299,12 @@ mkPat qualiImps nabla isOutermost needsLeftPad x = Ghc.L delta $
                          (mkPat qualiImps nabla False True arg2)
         _ | Ghc.RealDataCon dc <- con
           , Ghc.isUnboxedTupleDataCon dc
-          -> Ghc.TuplePat Ghc.noAnn
---                [ Ghc.AddEpAnn Ghc.AnnOpenPH EP.d0
---                , Ghc.AddEpAnn Ghc.AnnClosePH EP.d0
---                ]
+          -> Ghc.TuplePat Ghc.parenHashAnns
                (addCommaAnns $ zipWith (mkPat qualiImps nabla True) (False : repeat True) args)
                Ghc.Unboxed
         _ | Ghc.RealDataCon dc <- con
           , Ghc.isTupleDataCon dc
-          -> Ghc.TuplePat Ghc.noAnn
---                [ Ghc.AddEpAnn Ghc.AnnOpenP EP.d0
---                , Ghc.AddEpAnn Ghc.AnnCloseP EP.d0
---                ]
+          -> Ghc.TuplePat Ghc.parenAnns
                (addCommaAnns $ zipWith (mkPat qualiImps nabla True) (False : repeat True) args)
                Ghc.Boxed
         _ ->

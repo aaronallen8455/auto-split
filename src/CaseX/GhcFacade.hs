@@ -11,6 +11,8 @@ module CaseX.GhcFacade
   , getComments
   , setComments
   , fakeCommentLocation
+  , parenAnns
+  , parenHashAnns
   ) where
 
 #if MIN_VERSION_ghc(9,8,0)
@@ -192,4 +194,38 @@ fakeCommentLocation = Ghc.EpaDelta (Ghc.DifferentLine (-1) 0) Ghc.NoComments
 #elif MIN_VERSION_ghc(9,6,0)
   :: Ghc.Anchor
 fakeCommentLocation = Ghc.Anchor Ghc.placeholderRealSpan (Ghc.MovedAnchor (Ghc.DifferentLine (-1) 0))
+#endif
+
+#if MIN_VERSION_ghc(9,10,0)
+parenAnns :: [Ghc.AddEpAnn]
+parenAnns =
+  [ Ghc.AddEpAnn Ghc.AnnOpenP EP.d0
+  , Ghc.AddEpAnn Ghc.AnnCloseP EP.d0
+  ]
+
+parenHashAnns :: [Ghc.AddEpAnn]
+parenHashAnns =
+  [ Ghc.AddEpAnn Ghc.AnnOpenPH EP.d0
+  , Ghc.AddEpAnn Ghc.AnnClosePH EP.d0
+  ]
+#else
+parenAnns :: Ghc.EpAnn [Ghc.AddEpAnn]
+parenAnns = Ghc.EpAnn
+  { Ghc.entry = Ghc.Anchor Ghc.placeholderRealSpan EP.m0
+  , Ghc.anns =
+      [ Ghc.AddEpAnn Ghc.AnnOpenP EP.d0
+      , Ghc.AddEpAnn Ghc.AnnCloseP EP.d0
+      ]
+  , Ghc.comments = Ghc.emptyComments
+  }
+
+parenHashAnns :: Ghc.EpAnn [Ghc.AddEpAnn]
+parenHashAnns = Ghc.EpAnn
+  { Ghc.entry = Ghc.Anchor Ghc.placeholderRealSpan EP.m0
+  , Ghc.anns =
+      [ Ghc.AddEpAnn Ghc.AnnOpenPH EP.d0
+      , Ghc.AddEpAnn Ghc.AnnClosePH EP.d0
+      ]
+  , Ghc.comments = Ghc.emptyComments
+  }
 #endif
