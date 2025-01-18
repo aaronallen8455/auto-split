@@ -1,0 +1,14 @@
+module Case4 where
+
+main :: IO ()
+main = pure ()
+
+test1 :: Bool
+test1 =
+ case 1 of
+  1 -> False
+
+test2 :: Bool
+test2 =
+ case 1.1 of
+  1.1 -> False

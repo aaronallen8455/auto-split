@@ -10,6 +10,10 @@ common attrs
     default-language: GHC2021
     default-extensions: LambdaCase
 
+extra-source-files:
+  *.input
+  *.expected
+
 executable Case1
     import: attrs
     main-is: Case1.hs
@@ -29,6 +33,10 @@ executable Case4
 executable Case5
     import: attrs
     main-is: Case5.hs
+
+executable Case6
+    import: attrs
+    main-is: Case6.hs
 
 executable LambdaCase1
     import: attrs
