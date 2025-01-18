@@ -37,6 +37,10 @@ executable Case6
     import: attrs
     main-is: Case6.hs
 
+executable Case7
+    import: attrs
+    main-is: Case7.hs
+
 executable LambdaCase1
     import: attrs
     main-is: LambdaCase1.hs

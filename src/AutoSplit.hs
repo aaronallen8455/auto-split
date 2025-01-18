@@ -43,7 +43,10 @@ turnOnIncompletePatternWarn hscEnv = hscEnv
   { Ghc.hsc_dflags =
       let dflags = Ghc.hsc_dflags hscEnv
        in dflags
-          { Ghc.warningFlags = EnumSet.insert Ghc.Opt_WarnIncompletePatterns $ Ghc.warningFlags dflags }
+          { Ghc.warningFlags = EnumSet.insert Ghc.Opt_WarnIncompletePatterns $ Ghc.warningFlags dflags
+            -- Need to override the number of uncovered patterns reported.
+          , Ghc.maxUncoveredPatterns = maxBound - 1
+          }
   }
 
 -- | Incomplete patterns warning is emitted by the desugarer. Some shenanigans
