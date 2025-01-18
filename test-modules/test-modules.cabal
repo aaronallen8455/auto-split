@@ -6,9 +6,9 @@ extra-source-files:
   *.expected
 
 common attrs
-    ghc-options: -fplugin CaseX
+    ghc-options: -fplugin AutoSplit
     build-depends:    base,
-                      casex
+                      auto-split
     hs-source-dirs:   .
     default-language: GHC2021
     default-extensions: LambdaCase

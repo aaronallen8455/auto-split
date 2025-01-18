@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE CPP #-}
-module CaseX
+module AutoSplit
   ( plugin
   ) where
 
@@ -24,7 +24,7 @@ import qualified Language.Haskell.GHC.ExactPrint as EP
 import qualified Language.Haskell.GHC.ExactPrint.Parsers as EP
 import           Text.Read (readMaybe)
 
-import qualified CaseX.GhcFacade as Ghc
+import qualified AutoSplit.GhcFacade as Ghc
 
 plugin :: Ghc.Plugin
 plugin = Ghc.defaultPlugin
@@ -359,16 +359,16 @@ removeUnusedImportWarn :: Ghc.TcM ()
 removeUnusedImportWarn = do
   errsVar <- Ghc.getErrsVar
 #if MIN_VERSION_ghc(9,8,0)
-  let isCaseXImportWarn msgEnv =
+  let isAutoSplitImportWarn msgEnv =
         case Ghc.errMsgDiagnostic msgEnv of
           Ghc.TcRnMessageWithInfo _ (Ghc.TcRnMessageDetailed _ (Ghc.TcRnUnusedImport decl _)) ->
             Ghc.unLoc (Ghc.ideclName decl) == Ghc.mkModuleName patternModName
           _ -> False
   Ghc.liftIO . modifyIORef errsVar $
-    Ghc.mkMessages . Ghc.filterBag (not . isCaseXImportWarn) . Ghc.getMessages
+    Ghc.mkMessages . Ghc.filterBag (not . isAutoSplitImportWarn) . Ghc.getMessages
 #else
   -- 9.6 lacks the specific diagnostic
-  let isCaseXImportWarn msgEnv =
+  let isAutoSplitImportWarn msgEnv =
         case Ghc.errMsgDiagnostic msgEnv of
           Ghc.TcRnMessageWithInfo _ (Ghc.TcRnMessageDetailed _ (Ghc.TcRnUnknownMessage (Ghc.UnknownDiagnostic diag)))
             | Ghc.WarningWithFlag Ghc.Opt_WarnUnusedImports <- Ghc.diagnosticReason diag
@@ -376,7 +376,7 @@ removeUnusedImportWarn = do
           _ -> False
   Ghc.liftIO . modifyIORef errsVar $ \msgs ->
     -- the target import warning always shows up as the last occurrence
-    case break isCaseXImportWarn . reverse . Ghc.bagToList $ Ghc.getMessages msgs of
+    case break isAutoSplitImportWarn . reverse . Ghc.bagToList $ Ghc.getMessages msgs of
       (before, _ : after) -> Ghc.mkMessages . Ghc.listToBag . reverse $ before ++ after
       _ -> msgs
 #endif
@@ -404,4 +404,4 @@ splitName :: IsString a => a
 splitName = "SPLIT"
 
 patternModName :: IsString a => a
-patternModName = "CaseX.Pattern"
+patternModName = "AutoSplit.Pattern"

@@ -50,7 +50,7 @@ jobs:
 
     - name: Build
       run: |
-        cabal build casex
+        cabal build auto-split
 
     - name: Test
       run: |

@@ -1,5 +1,5 @@
 cabal-version:      3.0
-name:               casex
+name:               auto-split
 version:            0.1.0.0
 -- synopsis:
 -- description:
@@ -13,14 +13,16 @@ build-type:         Simple
 extra-doc-files:    CHANGELOG.md
 -- extra-source-files:
 
+tested-with: GHC == 9.10.1, GHC == 9.8.2, GHC == 9.6.6
+
 common warnings
     ghc-options: -Wall
 
 library
     import:           warnings
-    exposed-modules:  CaseX
-                      CaseX.Pattern
-    other-modules: CaseX.GhcFacade
+    exposed-modules:  AutoSplit
+                      AutoSplit.Pattern
+    other-modules: AutoSplit.GhcFacade
     -- other-extensions:
     build-depends:    base >=4.18.1.0,
                       ghc,
@@ -32,18 +34,17 @@ library
     hs-source-dirs:   src
     default-language: GHC2021
 
-executable app
-    import:           warnings
-    -- other-extensions:
-    build-depends:    base >=4.18.1.0,
-                      casex
-    hs-source-dirs:   app
-    default-language: GHC2021
-    ghc-options: -fplugin CaseX
-    main-is: Main.hs
-    default-extensions: LambdaCase
+--executable app
+--    import:           warnings
+--    build-depends:    base >=4.18.1.0,
+--                      auto-split
+--    hs-source-dirs:   app
+--    default-language: GHC2021
+--    ghc-options: -fplugin AutoSplit
+--    main-is: Main.hs
+--    default-extensions: LambdaCase
 
-test-suite ksplit-test
+test-suite auto-split-test
     import:           warnings
     default-language: GHC2021
     -- other-modules:

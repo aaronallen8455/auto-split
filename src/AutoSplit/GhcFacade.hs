@@ -1,5 +1,5 @@
 {-# LANGUAGE CPP #-}
-module CaseX.GhcFacade
+module AutoSplit.GhcFacade
   ( module Ghc
   , mkParPat'
   , anchorD0

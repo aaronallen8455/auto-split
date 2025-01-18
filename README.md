@@ -1,4 +1,4 @@
-# CaseX
+# auto-split
 
 A GHC plugin that does automatic case splitting.
 

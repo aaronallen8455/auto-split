@@ -1,5 +1,5 @@
 {-# LANGUAGE PatternSynonyms #-}
-module CaseX.Pattern
+module AutoSplit.Pattern
   ( pattern SPLIT
   ) where
 
