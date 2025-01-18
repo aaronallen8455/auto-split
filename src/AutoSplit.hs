@@ -18,7 +18,6 @@ import           Data.Maybe
 import           Data.Monoid (Any(..))
 import qualified Data.Map.Strict as M
 import           Data.String (IsString, fromString)
-import qualified GHC.Data.EnumSet as EnumSet
 import qualified GHC.Paths as Paths
 import qualified Language.Haskell.GHC.ExactPrint as EP
 import qualified Language.Haskell.GHC.ExactPrint.Parsers as EP
@@ -28,25 +27,13 @@ import qualified AutoSplit.GhcFacade as Ghc
 
 plugin :: Ghc.Plugin
 plugin = Ghc.defaultPlugin
-  { Ghc.driverPlugin = \_ hscEnv -> pure . turnOnIncompletePatternWarn $ addDsHook hscEnv
+  { Ghc.driverPlugin = \_ hscEnv -> pure $ addDsHook hscEnv
   , Ghc.parsedResultAction = \_ _ result -> pure $ addImport result
   , Ghc.pluginRecompile = Ghc.purePlugin
   , Ghc.renamedResultAction = \_ env groups ->
       removeUnusedImportWarn >> pure (env, groups)
   , Ghc.typeCheckResultAction = \_ _ env ->
       removeUnusedImportWarn >> pure env
-  }
-
--- | Plugin only functions if incomplete patterns warning is enabled, so we force it on.
-turnOnIncompletePatternWarn :: Ghc.HscEnv -> Ghc.HscEnv
-turnOnIncompletePatternWarn hscEnv = hscEnv
-  { Ghc.hsc_dflags =
-      let dflags = Ghc.hsc_dflags hscEnv
-       in dflags
-          { Ghc.warningFlags = EnumSet.insert Ghc.Opt_WarnIncompletePatterns $ Ghc.warningFlags dflags
-            -- Need to override the number of uncovered patterns reported.
-          , Ghc.maxUncoveredPatterns = maxBound - 1
-          }
   }
 
 -- | Incomplete patterns warning is emitted by the desugarer. Some shenanigans
@@ -87,8 +74,16 @@ addDsHook hscEnv = hscEnv
                     (maybe Ghc.noSrcSpan (Ghc.mkGeneralSrcSpan . fromString) mFilePath)
                     (Ghc.ghcUnknownMessage PatternSplitDiag)
                 warnsWithError = Ghc.addMessage customError warns
+                -- Plugin only functions if incomplete patterns warning is enabled, so we force it on.
+                updEnv = env
+                  -- Plugin only functions if incomplete patterns warning is enabled, so we force it on.
+                  -- If this is instead done as driver plugin, ghci sessions won't pick it up.
+                  { Ghc.hsc_dflags = (Ghc.hsc_dflags env `Ghc.wopt_set` Ghc.Opt_WarnIncompletePatterns)
+                    -- Need to override the number of uncovered patterns reported.
+                    { Ghc.maxUncoveredPatterns = maxBound - 1 }
+                  }
             catch
-              (runPhaseOrExistingHook $ Ghc.T_HscPostTc env modSum tcResult warnsWithError mOldHash)
+              (runPhaseOrExistingHook $ Ghc.T_HscPostTc updEnv modSum tcResult warnsWithError mOldHash)
               (\(Ghc.SourceError msgs) -> do
                 let (missingPatWarns, otherWarns) = Ghc.partitionBagWith isMissingPatWarn (Ghc.getMessages msgs)
                     -- Need to parse the module because GHC removes
