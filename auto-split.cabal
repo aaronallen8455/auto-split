@@ -29,20 +29,19 @@ library
                       syb,
                       ghc-exactprint,
                       ghc-paths,
-                      transformers,
-                      containers
+                      transformers
     hs-source-dirs:   src
     default-language: GHC2021
 
---executable app
---    import:           warnings
---    build-depends:    base >=4.18.1.0,
---                      auto-split
---    hs-source-dirs:   app
---    default-language: GHC2021
---    ghc-options: -fplugin AutoSplit
---    main-is: Main.hs
---    default-extensions: LambdaCase
+-- executable app
+--     import:           warnings
+--     build-depends:    base >=4.18.1.0,
+--                       auto-split
+--     hs-source-dirs:   app
+--     default-language: GHC2021
+--     ghc-options: -fplugin AutoSplit
+--     main-is: Main.hs
+--     default-extensions: LambdaCase
 
 test-suite auto-split-test
     import:           warnings

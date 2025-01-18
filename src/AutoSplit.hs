@@ -6,7 +6,6 @@ module AutoSplit
   ) where
 
 import           Control.Exception
-import           Control.Monad
 import qualified Control.Monad.Trans.Writer.CPS as Writer
 import qualified Data.Char as Char
 import           Data.Foldable
@@ -16,7 +15,6 @@ import           Data.IORef
 import qualified Data.List as List
 import           Data.Maybe
 import           Data.Monoid (Any(..))
-import qualified Data.Map.Strict as M
 import           Data.String (IsString, fromString)
 import qualified GHC.Paths as Paths
 import qualified Language.Haskell.GHC.ExactPrint as EP
@@ -97,10 +95,10 @@ addDsHook hscEnv = hscEnv
                           `traverse` mFilePath
                 case mResult of
                   Just (Right parsedMod) -> do
-                    let qualiImps = getQualifiedImports parsedMod
+                    let gblRdrEnv = Ghc.tcg_rdr_env gblEnv
                         ast = EP.makeDeltaAst
                             $ searchAndMark (Ghc.bagToList missingPatWarns) parsedMod
-                    case splitPattern qualiImps (Ghc.bagToList missingPatWarns) ast of
+                    case splitPattern gblRdrEnv (Ghc.bagToList missingPatWarns) ast of
                       (ps, Any True) ->
                         traverse_ (flip writeFile $ EP.exactPrint ps) mFilePath
                       _ -> pure ()
@@ -177,11 +175,11 @@ searchAndMark nePats = Syb.everywhere (Syb.mkT goExpr `Syb.extT` goDecl)
 -- | Finds the target pattern and splits it. Returns the modified source and True if successful.
 -- Applied post delta transformation.
 splitPattern
-  :: M.Map Ghc.ModuleName Ghc.ModuleName
+  :: Ghc.GlobalRdrEnv
   -> [NonExhaustivePattern]
   -> Ghc.ParsedSource
   -> (Ghc.ParsedSource, Any)
-splitPattern qualiImps nePats ps =
+splitPattern gblRdrEnv nePats ps =
     Writer.runWriter $
       Syb.everywhereM
         ( Syb.mkM (Writer.writer . goExpr)
@@ -252,7 +250,7 @@ splitPattern qualiImps nePats ps =
           newMatches = correctDeltas $ do
             nabla <- patternNablas nePat
             let pats =
-                  zipWith (mkPat qualiImps nabla $ not multiplePats)
+                  zipWith (mkPat gblRdrEnv nabla $ not multiplePats)
                           (offsetFirstPat : repeat True)
                           (patternIds nePat)
             [ Ghc.L splitAnn $ Ghc.Match Ghc.noAnn ctx pats rhs ]
@@ -270,13 +268,13 @@ matchHasSplit (Ghc.L _ (Ghc.Match _ _ pats _)) = Syb.everything (||) (Syb.mkQ Fa
 
 -- | Produce a 'Pat' for a missing pattern
 mkPat
-  :: M.Map Ghc.ModuleName Ghc.ModuleName
+  :: Ghc.GlobalRdrEnv
   -> Ghc.Nabla
   -> Bool -- ^ True => is a singular pattern which doesn't need outer parens
   -> Bool -- ^ True => needs left padding due separate it from another pattern
   -> Ghc.Id
   -> Ghc.LPat Ghc.GhcPs
-mkPat qualiImps nabla isOutermost needsLeftPad x = Ghc.L delta $
+mkPat gblRdrEnv nabla isOutermost needsLeftPad x = Ghc.L delta $
   case Ghc.lookupSolution nabla x of
     Nothing -> Ghc.WildPat Ghc.noExtField
     Just (Ghc.PACA (Ghc.PmAltConLike con) _tvs args) -> paren args $
@@ -284,20 +282,20 @@ mkPat qualiImps nabla isOutermost needsLeftPad x = Ghc.L delta $
         True | [arg1, arg2] <- args ->
           Ghc.ConPat Ghc.noAnn
             ( Ghc.L Ghc.nameAnchorD1
-            . nameToRdrName qualiImps
+            . nameToRdrName gblRdrEnv
             $ Ghc.conLikeName con
             )
-          $ Ghc.InfixCon (mkPat qualiImps nabla False False arg1)
-                         (mkPat qualiImps nabla False True arg2)
+          $ Ghc.InfixCon (mkPat gblRdrEnv nabla False False arg1)
+                         (mkPat gblRdrEnv nabla False True arg2)
         _ | Ghc.RealDataCon dc <- con
           , Ghc.isUnboxedTupleDataCon dc
           -> Ghc.TuplePat Ghc.parenHashAnns
-               (addCommaAnns $ zipWith (mkPat qualiImps nabla True) (False : repeat True) args)
+               (addCommaAnns $ zipWith (mkPat gblRdrEnv nabla True) (False : repeat True) args)
                Ghc.Unboxed
         _ | Ghc.RealDataCon dc <- con
           , Ghc.isTupleDataCon dc
           -> Ghc.TuplePat Ghc.parenAnns
-               (addCommaAnns $ zipWith (mkPat qualiImps nabla True) (False : repeat True) args)
+               (addCommaAnns $ zipWith (mkPat gblRdrEnv nabla True) (False : repeat True) args)
                Ghc.Boxed
         _ ->
           -- If GHC tries to use SPLIT as a missing pattern, replace it with wildcard
@@ -305,9 +303,9 @@ mkPat qualiImps nabla isOutermost needsLeftPad x = Ghc.L delta $
           then Ghc.WildPat Ghc.noExtField
           else Ghc.ConPat Ghc.noAnn
                 ( Ghc.L Ghc.nameAnchorD0
-                . nameToRdrName qualiImps $ Ghc.conLikeName con
+                . nameToRdrName gblRdrEnv $ Ghc.conLikeName con
                 )
-             $ Ghc.PrefixCon [] (mkPat qualiImps nabla False True <$> args)
+             $ Ghc.PrefixCon [] (mkPat gblRdrEnv nabla False True <$> args)
     Just (Ghc.PACA (Ghc.PmAltLit lit) _tvs _args) ->
       case Ghc.pm_lit_val lit of
         Ghc.PmLitInt integer ->
@@ -379,24 +377,15 @@ removeUnusedImportWarn = do
       _ -> msgs
 #endif
 
--- | It is necessary to track what modules are imported qualified so that
--- constructors in generated patterns can be correctly qualified.
-getQualifiedImports :: Ghc.ParsedSource -> M.Map Ghc.ModuleName Ghc.ModuleName
-getQualifiedImports (Ghc.L _ mo) = M.fromList . mapMaybe getQuali $ Ghc.hsmodImports mo
+nameToRdrName :: Ghc.GlobalRdrEnv -> Ghc.Name -> Ghc.RdrName
+nameToRdrName rdrEnv n =
+  case Ghc.lookupOccEnv rdrEnv occName of
+    Just (gre : _)
+      | rdrName : _ <- Ghc.greRdrNames gre
+      -> rdrName
+    _ -> Ghc.nameRdrName n
   where
-    getQuali (Ghc.L _ x) = do
-      guard $ Ghc.ideclQualified x /= Ghc.NotQualified
-      let mQualAs = Ghc.unLoc <$> Ghc.ideclAs x
-          modName = Ghc.unLoc $ Ghc.ideclName x
-      Just (modName, fromMaybe modName mQualAs)
-
-nameToRdrName :: M.Map Ghc.ModuleName Ghc.ModuleName -> Ghc.Name -> Ghc.RdrName
-nameToRdrName qualiImps n =
-  case M.lookup modName qualiImps of
-    Nothing -> Ghc.nameRdrName n
-    Just qual -> Ghc.mkRdrQual qual $ Ghc.getOccName n
-  where
-    modName = Ghc.moduleName $ Ghc.nameModule n
+    occName = Ghc.getOccName n
 
 splitName :: IsString a => a
 splitName = "SPLIT"

@@ -1,0 +1,9 @@
+module LambdaCase1 where
+
+import qualified Reexport as R
+
+main :: IO ()
+main = pure ()
+
+test :: R.Foo -> Bool
+test SPLIT = True

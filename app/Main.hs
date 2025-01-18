@@ -1,5 +1,7 @@
 module Main where
 
+import qualified Bar
+
 main :: IO ()
 main = pure ()
 
@@ -14,6 +16,8 @@ data D
   | C8
   | C9
 
-test :: D -> Bool
+test :: Bar.Foo -> Bool
 test x = case x of
-  SPLIT -> True
+           Bar.Foo -> True
+           Bar.Bar -> True
+           Bar.Baz -> True

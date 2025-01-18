@@ -25,6 +25,7 @@ main = defaultMain $ testGroup "Tests"
     ]
   , testGroup "fun cases"
     [ testCase "1" $ runTest "Fun1.hs"
+    , testCase "2" $ runTest "Fun2.hs"
     ]
   ]
 
