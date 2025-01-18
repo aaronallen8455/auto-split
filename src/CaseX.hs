@@ -1,10 +1,8 @@
-{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE CPP #-}
 module CaseX
-  ( pattern SPLIT
-  , plugin
+  ( plugin
   ) where
 
 import           Control.Exception
@@ -27,10 +25,6 @@ import qualified Language.Haskell.GHC.ExactPrint.Parsers as EP
 import           Text.Read (readMaybe)
 
 import qualified CaseX.GhcFacade as Ghc
-
--- | Used to induce the incomplete patterns warning from GHC
-pattern SPLIT :: a
-pattern SPLIT <- _
 
 plugin :: Ghc.Plugin
 plugin = Ghc.defaultPlugin
@@ -357,7 +351,7 @@ addImport result = result
         }
   }
   where
-    caseXImport = Ghc.noLocA . Ghc.simpleImportDecl $ Ghc.mkModuleName caseXName
+    caseXImport = Ghc.noLocA . Ghc.simpleImportDecl $ Ghc.mkModuleName patternModName
 
 -- | The automatically added import gets flagged as unused even if it is used.
 -- The solution here is to simply suppress the warning.
@@ -368,7 +362,7 @@ removeUnusedImportWarn = do
   let isCaseXImportWarn msgEnv =
         case Ghc.errMsgDiagnostic msgEnv of
           Ghc.TcRnMessageWithInfo _ (Ghc.TcRnMessageDetailed _ (Ghc.TcRnUnusedImport decl _)) ->
-            Ghc.unLoc (Ghc.ideclName decl) == Ghc.mkModuleName caseXName
+            Ghc.unLoc (Ghc.ideclName decl) == Ghc.mkModuleName patternModName
           _ -> False
   Ghc.liftIO . modifyIORef errsVar $
     Ghc.mkMessages . Ghc.filterBag (not . isCaseXImportWarn) . Ghc.getMessages
@@ -409,5 +403,5 @@ nameToRdrName qualiImps n =
 splitName :: IsString a => a
 splitName = "SPLIT"
 
-caseXName :: IsString a => a
-caseXName = "CaseX"
+patternModName :: IsString a => a
+patternModName = "CaseX.Pattern"

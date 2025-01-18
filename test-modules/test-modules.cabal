@@ -1,6 +1,9 @@
 cabal-version:      3.0
 name:               test-modules
 version:            0.1.0.0
+extra-source-files:
+  *.input
+  *.expected
 
 common attrs
     ghc-options: -fplugin CaseX
@@ -9,10 +12,6 @@ common attrs
     hs-source-dirs:   .
     default-language: GHC2021
     default-extensions: LambdaCase
-
-extra-source-files:
-  *.input
-  *.expected
 
 executable Case1
     import: attrs

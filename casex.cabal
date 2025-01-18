@@ -19,6 +19,7 @@ common warnings
 library
     import:           warnings
     exposed-modules:  CaseX
+                      CaseX.Pattern
     other-modules: CaseX.GhcFacade
     -- other-extensions:
     build-depends:    base >=4.18.1.0,
