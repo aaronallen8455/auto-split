@@ -1,0 +1,9 @@
+import qualified Import2 as I
+import           Import
+
+main :: IO ()
+main = pure ()
+
+test :: Foo -> Bool
+test x = case x of
+  SPLIT -> True

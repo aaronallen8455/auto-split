@@ -13,6 +13,7 @@ module AutoSplit.GhcFacade
   , fakeCommentLocation
   , parenAnns
   , parenHashAnns
+  , greToName
   ) where
 
 #if MIN_VERSION_ghc(9,8,0)
@@ -228,4 +229,12 @@ parenHashAnns = Ghc.EpAnn
       ]
   , Ghc.comments = Ghc.emptyComments
   }
+#endif
+
+greToName :: Ghc.GlobalRdrElt -> Ghc.Name
+greToName =
+#if MIN_VERSION_ghc(9,8,0)
+  Ghc.greName
+#else
+  Ghc.grePrintableName
 #endif

@@ -380,8 +380,9 @@ removeUnusedImportWarn = do
 nameToRdrName :: Ghc.GlobalRdrEnv -> Ghc.Name -> Ghc.RdrName
 nameToRdrName rdrEnv n =
   case Ghc.lookupOccEnv rdrEnv occName of
-    Just (gre : _)
-      | rdrName : _ <- Ghc.greRdrNames gre
+    Just gres
+      | Just gre <- find greMatches gres
+      , rdrName : _ <- Ghc.greRdrNames gre
       -> rdrName
     Nothing
       | not (Ghc.isWiredInName n)
@@ -392,6 +393,7 @@ nameToRdrName rdrEnv n =
     _ -> Ghc.nameRdrName n
   where
     occName = Ghc.getOccName n
+    greMatches gre = Ghc.greToName gre == n
 
 splitName :: IsString a => a
 splitName = "SPLIT"
