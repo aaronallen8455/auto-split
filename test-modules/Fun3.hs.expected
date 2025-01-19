@@ -1,0 +1,9 @@
+import Import (Foo)
+
+main :: IO ()
+main = pure ()
+
+test :: Foo -> Bool
+test NOT_IN_SCOPE.Foo = True
+test NOT_IN_SCOPE.Bar = True
+test NOT_IN_SCOPE.Baz = True

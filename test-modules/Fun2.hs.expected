@@ -1,5 +1,3 @@
-module LambdaCase1 where
-
 import qualified Reexport as R
 
 main :: IO ()

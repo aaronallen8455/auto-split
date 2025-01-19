@@ -56,7 +56,6 @@ The `SPLIT` pattern can be used in this way anywhere a pattern match group
 occurs: case statements, lamba case, or function declarations.
 
 Known caveats:
-- Patterns that are not in scope appear regardless
 - Doesn't work well with view patterns
 - Using SPLIT in pattern match will insert patterns for _all_ missing
   cases. It doesn't restrict to the position where SPLIT is used, as some users

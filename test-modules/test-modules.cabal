@@ -63,3 +63,8 @@ executable Fun2
     main-is: Fun2.hs
     other-modules: Import
                    Reexport
+
+executable Fun3
+    import: attrs
+    main-is: Fun3.hs
+    other-modules: Import

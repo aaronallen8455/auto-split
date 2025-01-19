@@ -383,6 +383,7 @@ nameToRdrName rdrEnv n =
     Just (gre : _)
       | rdrName : _ <- Ghc.greRdrNames gre
       -> rdrName
+    Nothing -> Ghc.mkRdrQual (Ghc.mkModuleName "NOT_IN_SCOPE") occName
     _ -> Ghc.nameRdrName n
   where
     occName = Ghc.getOccName n
