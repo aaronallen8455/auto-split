@@ -1,0 +1,7 @@
+main :: IO ()
+main = pure ()
+
+test :: [Bool] -> Bool
+test x = case x of
+  [] -> True
+  _ : _ -> True

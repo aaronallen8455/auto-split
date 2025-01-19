@@ -18,4 +18,3 @@ test :: D -> Bool
 test d =
  case d of
   SPLIT -> False
-
