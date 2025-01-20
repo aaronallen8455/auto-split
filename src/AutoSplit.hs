@@ -58,6 +58,7 @@ addDsHook hscEnv = hscEnv
                   , srcCodeLoc = srcSpan
                   }
               _ -> Right msgEnv
+          runPhaseOrExistingHook :: Ghc.TPhase res -> IO res
           runPhaseOrExistingHook = maybe Ghc.runPhase (\(Ghc.PhaseHook h) -> h) mExistingHook
       case tPhase of
         Ghc.T_HscPostTc env modSum tcResult@(Ghc.FrontendTypecheck gblEnv) warns mOldHash -> do
@@ -253,7 +254,7 @@ splitPattern gblRdrEnv nePats ps =
                   zipWith (mkPat gblRdrEnv nabla $ not multiplePats)
                           (offsetFirstPat : repeat True)
                           (patternIds nePat)
-            [ Ghc.L splitAnn $ Ghc.Match Ghc.noAnn ctx pats rhs ]
+            [ Ghc.L splitAnn $ Ghc.Match Ghc.noExtFieldCpp ctx (Ghc.noLocCpp pats) rhs ]
           newMatchGroup = beforeSplit ++ newMatches ++ filter (not . matchHasSplit) afterSplit
     = Just $ Ghc.MG x2 (Ghc.L ann2 newMatchGroup)
     | otherwise = Nothing

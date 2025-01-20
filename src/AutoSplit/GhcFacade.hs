@@ -14,6 +14,8 @@ module AutoSplit.GhcFacade
   , parenAnns
   , parenHashAnns
   , greToName
+  , noLocCpp
+  , noExtFieldCpp
   ) where
 
 #if MIN_VERSION_ghc(9,8,0)
@@ -131,7 +133,11 @@ nameAnchorD1 =
 
 nextLine
   :: Int
-#if MIN_VERSION_ghc(9,10,0)
+#if MIN_VERSION_ghc(9,12,0)
+  -> Ghc.NoAnn ann => Ghc.EpAnn ann
+nextLine colOffset =
+  Ghc.EpAnn (Ghc.EpaDelta Ghc.noSrcSpan (Ghc.DifferentLine 1 colOffset) []) Ghc.noAnn Ghc.emptyComments
+#elif MIN_VERSION_ghc(9,10,0)
   -> Ghc.NoAnn ann => Ghc.EpAnn ann
 nextLine colOffset =
   Ghc.EpAnn (Ghc.EpaDelta (Ghc.DifferentLine 1 colOffset) []) Ghc.noAnn Ghc.emptyComments
@@ -147,7 +153,10 @@ nextLine colOffset =
     Ghc.generatedSrcSpan --Ghc.Anchor Ghc.placeholderRealSpan (Ghc.MovedAnchor (Ghc.SameLine 0))
 #endif
 
-#if MIN_VERSION_ghc(9,10,0)
+#if MIN_VERSION_ghc(9,12,0)
+colDelta :: Ghc.EpAnn ann -> Int
+colDelta (Ghc.EpAnn (Ghc.EpaDelta _ delta _) _ _)
+#elif MIN_VERSION_ghc(9,10,0)
 colDelta :: Ghc.EpAnn ann -> Int
 colDelta (Ghc.EpAnn (Ghc.EpaDelta delta _) _ _)
 #elif MIN_VERSION_ghc(9,6,0)
@@ -189,7 +198,10 @@ setComments comms defAnn a =
 -- | A location used for the comments that are inserted for targeted elements.
 -- By using a negative column delta, the layout is not affected.
 fakeCommentLocation
-#if MIN_VERSION_ghc(9,10,0)
+#if MIN_VERSION_ghc(9,12,0)
+  :: Ghc.NoCommentsLocation
+fakeCommentLocation = Ghc.EpaDelta Ghc.noSrcSpan (Ghc.DifferentLine (-1) 0) Ghc.NoComments
+#elif MIN_VERSION_ghc(9,10,0)
   :: Ghc.NoCommentsLocation
 fakeCommentLocation = Ghc.EpaDelta (Ghc.DifferentLine (-1) 0) Ghc.NoComments
 #elif MIN_VERSION_ghc(9,6,0)
@@ -197,7 +209,13 @@ fakeCommentLocation = Ghc.EpaDelta (Ghc.DifferentLine (-1) 0) Ghc.NoComments
 fakeCommentLocation = Ghc.Anchor Ghc.placeholderRealSpan (Ghc.MovedAnchor (Ghc.DifferentLine (-1) 0))
 #endif
 
-#if MIN_VERSION_ghc(9,10,0)
+#if MIN_VERSION_ghc(9,12,0)
+parenAnns :: (Ghc.EpaLocation, Ghc.EpaLocation)
+parenAnns = (EP.d0, EP.d0)
+
+parenHashAnns :: (Ghc.EpaLocation, Ghc.EpaLocation)
+parenHashAnns = (EP.d0, EP.d0)
+#elif MIN_VERSION_ghc(9,10,0)
 parenAnns :: [Ghc.AddEpAnn]
 parenAnns =
   [ Ghc.AddEpAnn Ghc.AnnOpenP EP.d0
@@ -237,4 +255,23 @@ greToName =
   Ghc.greName
 #else
   Ghc.grePrintableName
+#endif
+
+#if MIN_VERSION_ghc(9,12,0)
+noLocCpp :: Ghc.HasAnnotation e => a -> Ghc.GenLocated e a
+noLocCpp = Ghc.noLocA
+#else
+noLocCpp :: a -> a
+noLocCpp = id
+#endif
+
+#if MIN_VERSION_ghc(9,12,0)
+noExtFieldCpp :: Ghc.NoExtField
+noExtFieldCpp = Ghc.noExtField
+#elif MIN_VERSION_ghc(9,10,0)
+noExtFieldCpp :: [a]
+noExtFieldCpp = []
+#else
+noExtFieldCpp :: Ghc.EpAnn a
+noExtFieldCpp = Ghc.noAnn
 #endif
