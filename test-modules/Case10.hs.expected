@@ -1,0 +1,10 @@
+import           Import (Foo)
+
+main :: IO ()
+main = pure ()
+
+test :: Foo -> Bool
+test x = case x of
+  NOT_IN_SCOPE.Foo -> True
+  NOT_IN_SCOPE.Bar -> True
+  NOT_IN_SCOPE.Baz -> True

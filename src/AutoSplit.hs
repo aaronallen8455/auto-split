@@ -260,7 +260,8 @@ splitPattern gblRdrEnv nePats ps =
     | otherwise = Nothing
 
 matchHasSplit :: Ghc.LMatch Ghc.GhcPs (Ghc.LHsExpr Ghc.GhcPs) -> Bool
-matchHasSplit (Ghc.L _ (Ghc.Match _ _ pats _)) = Syb.everything (||) (Syb.mkQ False isSplitCon) pats
+matchHasSplit (Ghc.L _ (Ghc.Match _ _ pats _)) =
+    Syb.everything (||) (Syb.mkQ False isSplitCon) pats
   where
   isSplitCon :: Ghc.Pat Ghc.GhcPs -> Bool
   isSplitCon (Ghc.ConPat _ (Ghc.L _ rdr) _) =

@@ -2,11 +2,9 @@
 
 A GHC plugin that does automatic case splitting.
 
-**Under developement**
-
-To get started, simply enable the plugin and use `SPLIT` in a pattern match for
-a case statement or function declaration. Running GHC will then result in that
-pattern match being expanded to cover all missing cases.
+Simply enable the plugin and use `SPLIT` in a pattern match for a case
+statement or function declaration. Compiling the module will then result in
+that pattern match being expanded to cover all missing cases.
 
 For example, compiling this module
 
@@ -55,9 +53,34 @@ foo x = case x of
 The `SPLIT` pattern can be used in this way anywhere a pattern match group
 occurs: case statements, lamba case, or function declarations.
 
-Known caveats:
+If case splitting results in constructors or patterns that are not in scope,
+they will be qualified with `NOT_IN_SCOPE`.
+
+Compilation will abort when case splitting occurs since the module file has
+been updated. This is done by having GHC emit a custom error.
+
+### Usage
+
+This plugin is intended to be used with GHCi or related utilities such as
+`ghcid` and `ghciwatch` rather than as a package dependency. Here is an example
+of how to use it in the REPL for a stack project:
+
+```
+stack repl my-project --package auto-split --ghci-options='-fplugin AutoSplit'
+```
+
+or a cabal project:
+
+```
+cabal repl my-project --build-depends auto-split --repl-options='-fplugin AutoSplit'
+```
+
+### Known caveats
+
+- A module must pass the type checker for splitting to occur, unless the
+  `-fdefer-type-errors` GHC flag is used.
 - Doesn't work well with view patterns
-- Using SPLIT in pattern match will insert patterns for _all_ missing
-  cases. It doesn't restrict to the position where SPLIT is used, as some users
-  might expect.
-- If there are no missing patterns then SPLIT will have no effect
+- Using SPLIT in pattern match will insert patterns for _all_ missing cases in
+  the group. It doesn't restrict to the position where SPLIT is used.
+- The plugin only supports certain GHC versions with the intention of supporting
+  the four latest major releases. Check the cabal file for specifics.

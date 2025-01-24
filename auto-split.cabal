@@ -13,7 +13,7 @@ build-type:         Simple
 extra-doc-files:    CHANGELOG.md
 -- extra-source-files:
 
-tested-with: GHC == 9.10.1, GHC == 9.8.2, GHC == 9.6.6
+tested-with: GHC == 9.12.1, GHC == 9.10.1, GHC == 9.8.2, GHC == 9.6.6
 
 common warnings
     ghc-options: -Wall

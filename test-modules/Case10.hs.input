@@ -1,0 +1,8 @@
+import           Import (Foo)
+
+main :: IO ()
+main = pure ()
+
+test :: Foo -> Bool
+test x = case x of
+  SPLIT -> True
