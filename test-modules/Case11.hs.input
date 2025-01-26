@@ -1,0 +1,7 @@
+main :: IO ()
+main = pure ()
+
+test :: Bool -> Bool -> Bool
+test x y = case x of
+  SPLIT -> case y of
+    SPLIT -> False

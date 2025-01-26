@@ -55,6 +55,11 @@ executable Case10
     main-is: Case10.hs
     other-modules: Import
 
+executable Case11
+    import: attrs
+    main-is: Case11.hs
+    other-modules: Import
+
 executable LambdaCase1
     import: attrs
     main-is: LambdaCase1.hs

@@ -28,8 +28,6 @@ plugin = Ghc.defaultPlugin
   { Ghc.driverPlugin = \_ hscEnv -> pure $ addDsHook hscEnv
   , Ghc.parsedResultAction = \_ _ result -> pure $ addImport result
   , Ghc.pluginRecompile = Ghc.purePlugin
-  , Ghc.renamedResultAction = \_ env groups ->
-      removeUnusedImportWarn >> pure (env, groups)
   , Ghc.typeCheckResultAction = \_ _ env ->
       removeUnusedImportWarn >> pure env
   }
@@ -113,7 +111,7 @@ data PatternSplitDiag = PatternSplitDiag
 
 instance Ghc.Diagnostic PatternSplitDiag where
   type DiagnosticOpts PatternSplitDiag = Ghc.NoDiagnosticOpts
-  diagnosticMessage _ _ = Ghc.mkSimpleDecorated (Ghc.text "Splitting targeted patterns (this is not an error)")
+  diagnosticMessage _ _ = Ghc.mkSimpleDecorated (Ghc.text "Splitting patterns (this is not an error)")
   diagnosticReason _ = Ghc.ErrorWithoutFlag
   diagnosticHints _ = []
   diagnosticCode _ = Nothing
