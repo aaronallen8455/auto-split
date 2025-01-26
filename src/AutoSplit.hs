@@ -134,7 +134,8 @@ searchAndMark
   :: [NonExhaustivePattern]
   -> Ghc.ParsedSource
   -> Ghc.ParsedSource
-searchAndMark nePats = Syb.everywhere (Syb.mkT goExpr `Syb.extT` goDecl)
+searchAndMark nePats =
+    Syb.everywhere (Syb.mkT goExpr `Syb.extT` goDecl `Syb.extT` goBind)
   where
   goExpr :: Ghc.LHsExpr Ghc.GhcPs -> Ghc.LHsExpr Ghc.GhcPs
   goExpr (Ghc.L ann c@Ghc.HsCase{})
@@ -162,6 +163,13 @@ searchAndMark nePats = Syb.everywhere (Syb.mkT goExpr `Syb.extT` goDecl)
     = Ghc.L (addIndexComment ann neIdx) f
   goDecl x = x
 
+  goBind :: Ghc.LHsBind Ghc.GhcPs -> Ghc.LHsBind Ghc.GhcPs
+  goBind (Ghc.L ann f@Ghc.FunBind{})
+    | Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
+    , Just neIdx <- List.findIndex ((caseLoc ==) . srcCodeLoc) nePats
+    = Ghc.L (addIndexComment ann neIdx) f
+  goBind x = x
+
   addIndexComment ann neIdx =
     let com :: Ghc.LEpaComment
         com = Ghc.L Ghc.fakeCommentLocation
@@ -183,6 +191,7 @@ splitPattern gblRdrEnv nePats ps =
       Syb.everywhereM
         ( Syb.mkM (Writer.writer . goExpr)
           `Syb.extM` (Writer.writer . goDecl)
+          `Syb.extM` (Writer.writer . goBind)
         ) ps
   where
   isIdxComment (Ghc.L _ (Ghc.EpaComment (Ghc.EpaLineComment str) realSpan))
@@ -235,6 +244,16 @@ splitPattern gblRdrEnv nePats ps =
       , Any True
       )
   goDecl decl = (decl, Any False)
+
+  goBind :: Ghc.LHsBind Ghc.GhcPs -> (Ghc.LHsBind Ghc.GhcPs, Any)
+  goBind (Ghc.L ann (Ghc.FunBind x2 fid matchGroup))
+    | Just (neIdx, otherComms) <- extractIdxComment (Ghc.getComments ann)
+    , Just nePat <- listToMaybe $ drop neIdx nePats
+    , Just newMG <- splitMG True True 0 nePat matchGroup
+    = ( Ghc.L (Ghc.setComments otherComms mempty ann) (Ghc.FunBind x2 fid newMG)
+      , Any True
+      )
+  goBind bind = (bind, Any False)
 
   splitMG multiplePats offsetFirstPat colOffset nePat (Ghc.MG x2 (Ghc.L ann2 matches))
     | (beforeSplit, Ghc.L splitAnn (Ghc.Match _ ctx _ rhs) : afterSplit)

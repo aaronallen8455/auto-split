@@ -1,0 +1,12 @@
+import Import
+
+main :: IO ()
+main = pure ()
+
+test :: Foo -> Bool
+test foo =
+  let f :: Foo -> Bool
+      f Foo = True
+      f Bar = True
+      f Baz = True
+  in f foo
