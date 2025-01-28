@@ -92,3 +92,8 @@ executable Fun4
     import: attrs
     main-is: Fun4.hs
     other-modules: Import
+
+executable Fun5
+    import: attrs
+    main-is: Fun5.hs
+    other-modules: Import

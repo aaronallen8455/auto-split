@@ -1,0 +1,10 @@
+import Import
+
+main :: IO ()
+main = pure ()
+
+test :: Foo -> Bool
+test foo = f foo
+  where
+    f :: Foo -> Bool
+    f SPLIT = True
