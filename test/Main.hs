@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module Main (main) where
 
 import           Control.Monad
@@ -20,6 +21,14 @@ main = defaultMain $ testGroup "Tests"
     , testCase "9" $ runTest "Case9.hs"
     , testCase "10" $ runTest "Case10.hs"
     , testCase "11" $ runTest "Case11.hs"
+    , testCase "13" $ runTest "Case13.hs"
+#if __GLASGOW_HASKELL__ >= 912
+    , testCase "12" $ runTest "Case12.hs"
+    , testCase "14" $ runTest "Case14.hs"
+    , testCase "15" $ runTest "Case15.hs"
+    , testCase "16" $ runTest "Case16.hs"
+#endif
+    , testCase "17" $ runTest "Case17.hs"
     ]
   , testGroup "lambda case"
     [ testCase "1" $ runTest "LambdaCase1.hs"

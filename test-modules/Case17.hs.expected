@@ -1,0 +1,18 @@
+{-# LANGUAGE CPP #-}
+main :: IO ()
+main = pure ()
+
+#if true
+inCpp :: Bool
+inCpp = False
+#endif
+
+test :: Bool -> Bool
+test x = case x of
+  False -> True
+  True -> True
+
+#if true
+inCpp2 :: Bool
+inCpp2 = False
+#endif

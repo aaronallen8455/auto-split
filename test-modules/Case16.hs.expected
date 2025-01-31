@@ -1,0 +1,13 @@
+{-# LANGUAGE OrPatterns #-}
+import           Import
+
+main :: IO ()
+main = pure ()
+
+test :: Maybe (Maybe Foo) -> Int
+test x = case x of
+  Just (Nothing) -> 1
+  Just (Just Bar) -> 1
+  Just (Just Baz) -> 1
+  Nothing -> 2
+  Just (Just (Foo)) -> 3

@@ -37,6 +37,7 @@ import           GHC.Driver.Main as Ghc
 import           GHC.Driver.Pipeline.Execute as Ghc
 import           GHC.Driver.Pipeline.Phases as Ghc
 import           GHC.Driver.Plugins as Ghc
+import           GHC.Driver.Monad as Ghc
 import           GHC.Hs as Ghc
 import           GHC.HsToCore.Errors.Types as Ghc
 import           GHC.HsToCore.Pmc.Solver.Types as Ghc

@@ -13,12 +13,14 @@ import           Data.Functor
 import qualified Data.Generics as Syb
 import           Data.IORef
 import qualified Data.List as List
+import qualified Data.List.NonEmpty as NE
 import           Data.Maybe
 import           Data.Monoid (Any(..))
 import           Data.String (IsString, fromString)
 import qualified GHC.Paths as Paths
 import qualified Language.Haskell.GHC.ExactPrint as EP
 import qualified Language.Haskell.GHC.ExactPrint.Parsers as EP
+import qualified Language.Haskell.GHC.ExactPrint.Utils as EP
 import           Text.Read (readMaybe)
 
 import qualified AutoSplit.GhcFacade as Ghc
@@ -88,10 +90,20 @@ addDsHook hscEnv = hscEnv
                     -- Use the options from compilation to parse the module, otherwise certain
                     -- syntax extensions won't parse correctly.
                     dynFlags = Ghc.ms_hspp_opts modSum `Ghc.gopt_set` Ghc.Opt_KeepRawTokenStream
-                mResult <- EP.ghcWrapper Paths.libdir $
-                  fmap EP.postParseTransform
-                    <$> EP.parseModuleEpAnnsWithCppInternal EP.defaultCppOptions dynFlags
+                (mResult, usesCpp) <- EP.ghcWrapper Paths.libdir $ do
+                  Ghc.setSession env { Ghc.hsc_dflags = dynFlags }
+                  mRes <- EP.parseModuleEpAnnsWithCppInternal EP.defaultCppOptions dynFlags
                           `traverse` mFilePath
+                  let mCppComments = fmap (\(c, _, _) -> c) <$> mRes
+                      hasCpp = case mCppComments of
+                                 Just (Right cs) -> not $ null cs
+                                 _ -> False
+                  pure
+                    ( liftA2 (liftA2 EP.insertCppComments)
+                        (fmap EP.postParseTransform mRes)
+                        mCppComments
+                    , hasCpp
+                    )
                 case mResult of
                   Just (Right parsedMod) -> do
                     let gblRdrEnv = Ghc.tcg_rdr_env gblEnv
@@ -99,7 +111,16 @@ addDsHook hscEnv = hscEnv
                             $ searchAndMark (Ghc.bagToList missingPatWarns) parsedMod
                     case splitPattern gblRdrEnv (Ghc.bagToList missingPatWarns) ast of
                       (ps, Any True) ->
-                        traverse_ (flip writeFile $ EP.exactPrint ps) mFilePath
+                        -- If the source contains CPP, newlines are appended
+                        -- to the end of the file when exact printing. The simple
+                        -- solution is to remove trailing newlines after exact printing
+                        -- if the source contained CPP comments.
+                        let removeTrailingNewlines
+                              | usesCpp =
+                                  reverse . ('\n' :) . dropWhile (== '\n') . reverse
+                              | otherwise = id
+                            printed = removeTrailingNewlines $ EP.exactPrint ps
+                         in traverse_ (`writeFile` printed) mFilePath
                       _ -> pure ()
                   _ -> pure ()
                 throw . Ghc.SourceError $ Ghc.mkMessages otherWarns
@@ -111,7 +132,8 @@ data PatternSplitDiag = PatternSplitDiag
 
 instance Ghc.Diagnostic PatternSplitDiag where
   type DiagnosticOpts PatternSplitDiag = Ghc.NoDiagnosticOpts
-  diagnosticMessage _ _ = Ghc.mkSimpleDecorated (Ghc.text "Splitting patterns (this is not an error)")
+  diagnosticMessage _ _ = Ghc.mkSimpleDecorated $
+    Ghc.text "Module updated by auto-split, compilation aborted"
   diagnosticReason _ = Ghc.ErrorWithoutFlag
   diagnosticHints _ = []
   diagnosticCode _ = Nothing
@@ -211,7 +233,7 @@ splitPattern gblRdrEnv nePats ps =
   goExpr (Ghc.L ann (Ghc.HsCase x scrut matchGroup))
     | Just (neIdx, otherComms) <- extractIdxComment (Ghc.getComments ann)
     , Just nePat <- listToMaybe $ drop neIdx nePats
-    , Just newMG <- splitMG False False 0 nePat matchGroup
+    , Just newMG <- splitMG gblRdrEnv False False 0 nePat matchGroup
     = ( Ghc.L (Ghc.setComments otherComms mempty ann) (Ghc.HsCase x scrut newMG)
       , Any True
       )
@@ -220,7 +242,7 @@ splitPattern gblRdrEnv nePats ps =
     | lamType /= Ghc.LamSingle
     , Just (neIdx, otherComms) <- extractIdxComment (Ghc.comments ann)
     , Just nePat <- nePats List.!? neIdx
-    , Just newMG <- splitMG True False (Ghc.colDelta matchesAnn) nePat matchGroup
+    , Just newMG <- splitMG gblRdrEnv True False (Ghc.colDelta matchesAnn) nePat matchGroup
     = ( Ghc.L ann {Ghc.comments = otherComms} (Ghc.HsLam x lamType newMG)
       , Any True
       )
@@ -228,7 +250,7 @@ splitPattern gblRdrEnv nePats ps =
   goExpr (Ghc.L ann (Ghc.HsLamCase x lamType matchGroup@(Ghc.MG _ (Ghc.L matchesAnn _))))
     | Just (neIdx, otherComms) <- extractIdxComment (Ghc.getComments ann)
     , Just nePat <- listToMaybe $ drop neIdx nePats
-    , Just newMG <- splitMG True False (Ghc.colDelta matchesAnn) nePat matchGroup
+    , Just newMG <- splitMG gblRdrEnv True False (Ghc.colDelta matchesAnn) nePat matchGroup
     = ( Ghc.L (Ghc.setComments otherComms mempty ann) (Ghc.HsLamCase x lamType newMG)
       , Any True
       )
@@ -239,7 +261,7 @@ splitPattern gblRdrEnv nePats ps =
   goDecl (Ghc.L ann (Ghc.ValD x (Ghc.FunBind x2 fid matchGroup)))
     | Just (neIdx, otherComms) <- extractIdxComment (Ghc.getComments ann)
     , Just nePat <- listToMaybe $ drop neIdx nePats
-    , Just newMG <- splitMG True True 0 nePat matchGroup
+    , Just newMG <- splitMG gblRdrEnv True True 0 nePat matchGroup
     = ( Ghc.L (Ghc.setComments otherComms mempty ann) (Ghc.ValD x (Ghc.FunBind x2 fid newMG))
       , Any True
       )
@@ -249,54 +271,100 @@ splitPattern gblRdrEnv nePats ps =
   goBind (Ghc.L ann (Ghc.FunBind x2 fid matchGroup))
     | Just (neIdx, otherComms) <- extractIdxComment (Ghc.getComments ann)
     , Just nePat <- listToMaybe $ drop neIdx nePats
-    , Just newMG <- splitMG True True 0 nePat matchGroup
+    , Just newMG <- splitMG gblRdrEnv True True 0 nePat matchGroup
     = ( Ghc.L (Ghc.setComments otherComms mempty ann) (Ghc.FunBind x2 fid newMG)
       , Any True
       )
   goBind bind = (bind, Any False)
 
-  splitMG multiplePats offsetFirstPat colOffset nePat (Ghc.MG x2 (Ghc.L ann2 matches))
-    | (beforeSplit, Ghc.L splitAnn (Ghc.Match _ ctx _ rhs) : afterSplit)
-        <- break matchHasSplit matches
-    , let -- If splitting the first match, trailing matches need to have a delta
-          -- putting it on a new line
-          correctDeltas [] = []
-          correctDeltas (x : xs) =
-            x :
-              (Ghc.L (Ghc.nextLine colOffset) . Ghc.unLoc
-               <$> xs)
-          newMatches = correctDeltas $ do
-            nabla <- patternNablas nePat
-            let pats =
-                  zipWith (mkPat gblRdrEnv nabla $ not multiplePats)
-                          (offsetFirstPat : repeat True)
-                          (patternIds nePat)
-            [ Ghc.L splitAnn $ Ghc.Match Ghc.noExtFieldCpp ctx (Ghc.noLocCpp pats) rhs ]
-          newMatchGroup = beforeSplit ++ newMatches ++ filter (not . matchHasSplit) afterSplit
-    = Just $ Ghc.MG x2 (Ghc.L ann2 newMatchGroup)
-    | otherwise = Nothing
+splitMG
+  :: Ghc.GlobalRdrEnv
+  -> Bool -- True => match group can have multiple patterns
+  -> Bool -- True => add left padding to each new pattern
+  -> Int -- Number of horizontal spaces at the front of inserted pattern match
+  -> NonExhaustivePattern
+  -> Ghc.MatchGroup Ghc.GhcPs (Ghc.LHsExpr Ghc.GhcPs)
+  -> Maybe (Ghc.MatchGroup Ghc.GhcPs (Ghc.LHsExpr Ghc.GhcPs))
+splitMG gblRdrEnv multiplePats offsetFirstPat colOffset nePat (Ghc.MG x2 (Ghc.L ann2 matches))
+  | (beforeSplit, Ghc.L splitAnn targetMatch@(Ghc.Match _ ctx _ rhs) : afterSplit)
+      <- break matchHasSplit matches
+  , let mUpdatedMatch = Ghc.L splitAnn <$> removeSplitFromOrPat targetMatch
+        -- If splitting the first match, trailing matches need to have a delta
+        -- putting it on a new line
+        correctDeltas [] = []
+        correctDeltas (x : xs) | isNothing mUpdatedMatch =
+          x :
+            (Ghc.L (Ghc.nextLine colOffset) . Ghc.unLoc
+             <$> xs)
+        correctDeltas xs = Ghc.L (Ghc.nextLine colOffset) . Ghc.unLoc <$> xs
+        newMatches = correctDeltas $ do
+          nabla <- patternNablas nePat
+          let pats =
+                zipWith (mkPat gblRdrEnv nabla $ not multiplePats)
+                        (offsetFirstPat : repeat True)
+                        (patternIds nePat)
+          [ Ghc.L splitAnn $ Ghc.Match Ghc.noExtFieldCpp ctx (Ghc.noLocCpp pats) rhs ]
+        removeSplits m =
+          case traverse removeSplitFromOrPat m of
+            Nothing -> if matchHasSplit m then Nothing else Just m
+            Just newM -> Just newM
+        afterSplitUpdated = mapMaybe removeSplits afterSplit
+        newMatchGroup
+          = beforeSplit
+         ++ maybeToList mUpdatedMatch
+         ++ newMatches
+         ++ afterSplitUpdated
+  = Just $ Ghc.MG x2 (Ghc.L ann2 newMatchGroup)
+  | otherwise = Nothing
 
 matchHasSplit :: Ghc.LMatch Ghc.GhcPs (Ghc.LHsExpr Ghc.GhcPs) -> Bool
 matchHasSplit (Ghc.L _ (Ghc.Match _ _ pats _)) =
     Syb.everything (||) (Syb.mkQ False isSplitCon) pats
-  where
-  isSplitCon :: Ghc.Pat Ghc.GhcPs -> Bool
-  isSplitCon (Ghc.ConPat _ (Ghc.L _ rdr) _) =
-    Ghc.rdrNameOcc rdr == Ghc.mkDataOcc splitName
-  isSplitCon _ = False
+
+isSplitCon :: Ghc.Pat Ghc.GhcPs -> Bool
+isSplitCon (Ghc.ConPat _ (Ghc.L _ rdr) _) =
+  Ghc.rdrNameOcc rdr == Ghc.mkDataOcc splitName
+isSplitCon _ = False
+
+-- | Remove SPLIT pattern from OrPat groups. Returns Just if the match was modified.
+removeSplitFromOrPat
+  :: Ghc.Match Ghc.GhcPs (Ghc.LHsExpr Ghc.GhcPs)
+  -> Maybe (Ghc.Match Ghc.GhcPs (Ghc.LHsExpr Ghc.GhcPs))
+#if MIN_VERSION_ghc(9,12,0)
+removeSplitFromOrPat (Ghc.Match a b pats c) =
+  let mNewPats = Syb.everywhereM (Syb.mkM (Writer.writer . go)) pats
+      patHasSplit = Syb.everything (||) (Syb.mkQ False isSplitCon)
+      dropSemicolon ann = ann { Ghc.anns = Ghc.noAnn }
+      go :: Ghc.Pat Ghc.GhcPs -> (Ghc.Pat Ghc.GhcPs, Any)
+      go (Ghc.OrPat x oPats) =
+        case reverse (NE.filter (not . patHasSplit) oPats) of
+          [] -> (Ghc.WildPat Ghc.noExtField, Any True)
+          (Ghc.L patAnn lastPat : fPats)
+            | length fPats + 1 /= NE.length oPats ->
+                ( Ghc.OrPat x
+                    (NE.reverse $ Ghc.L (dropSemicolon patAnn) lastPat NE.:| fPats)
+                , Any True)
+            | otherwise -> (Ghc.OrPat x oPats, Any False)
+      go other = (other, Any False)
+   in case Writer.runWriter mNewPats of
+        (newPats, Any True) -> Just (Ghc.Match a b newPats c)
+        _ -> Nothing
+#else
+removeSplitFromOrPat _ = Nothing
+#endif
 
 -- | Produce a 'Pat' for a missing pattern
 mkPat
   :: Ghc.GlobalRdrEnv
   -> Ghc.Nabla
   -> Bool -- ^ True => is a singular pattern which doesn't need outer parens
-  -> Bool -- ^ True => needs left padding due separate it from another pattern
+  -> Bool -- ^ True => needs left padding to separate it from another pattern
   -> Ghc.Id
   -> Ghc.LPat Ghc.GhcPs
 mkPat gblRdrEnv nabla isOutermost needsLeftPad x = Ghc.L delta $
   case Ghc.lookupSolution nabla x of
     Nothing -> Ghc.WildPat Ghc.noExtField
-    Just (Ghc.PACA (Ghc.PmAltConLike con) _tvs args) -> paren args $
+    Just (Ghc.PACA (Ghc.PmAltConLike con) _tvs args) -> paren con args $
       case Ghc.conLikeIsInfix con of
         True | [arg1, arg2] <- args ->
           Ghc.ConPat Ghc.noAnn
@@ -342,8 +410,9 @@ mkPat gblRdrEnv nabla isOutermost needsLeftPad x = Ghc.L delta $
     delta = if needsLeftPad
                then Ghc.anchorD1
                else Ghc.anchorD0
-    paren [] inner = inner
-    paren _ inner =
+    paren _ [] inner = inner
+    paren (Ghc.RealDataCon dc) _ inner | Ghc.isTupleDataCon dc = inner -- No parens for tuple pats
+    paren _ _ inner =
       if not isOutermost
       then Ghc.mkParPat' (Ghc.L Ghc.anchorD0 inner)
       else inner

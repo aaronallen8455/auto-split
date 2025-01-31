@@ -1,0 +1,13 @@
+{-# LANGUAGE OrPatterns #-}
+import           Import
+
+main :: IO ()
+main = pure ()
+
+test :: Foo -> Bool
+test x = case x of
+  (Foo; SPLIT; Bar) -> True
+
+test2 :: Foo -> Bool
+test2 x = case x of
+  (SPLIT; Foo; Bar) -> True
