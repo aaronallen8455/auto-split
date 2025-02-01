@@ -90,42 +90,60 @@ addDsHook hscEnv = hscEnv
                     -- Use the options from compilation to parse the module, otherwise certain
                     -- syntax extensions won't parse correctly.
                     dynFlags = Ghc.ms_hspp_opts modSum `Ghc.gopt_set` Ghc.Opt_KeepRawTokenStream
-                (mResult, usesCpp) <- EP.ghcWrapper Paths.libdir $ do
-                  Ghc.setSession env { Ghc.hsc_dflags = dynFlags }
-                  mRes <- EP.parseModuleEpAnnsWithCppInternal EP.defaultCppOptions dynFlags
-                          `traverse` mFilePath
-                  let mCppComments = fmap (\(c, _, _) -> c) <$> mRes
-                      hasCpp = case mCppComments of
-                                 Just (Right cs) -> not $ null cs
-                                 _ -> False
-                  pure
-                    ( liftA2 (liftA2 EP.insertCppComments)
-                        (fmap EP.postParseTransform mRes)
-                        mCppComments
-                    , hasCpp
-                    )
-                case mResult of
-                  Just (Right parsedMod) -> do
+                eResult <- traverse (parseModule env dynFlags) mFilePath
+                case eResult of
+                  Just (Right parsedMod, usesCpp) -> do
                     let gblRdrEnv = Ghc.tcg_rdr_env gblEnv
-                        ast = EP.makeDeltaAst
-                            $ searchAndMark (Ghc.bagToList missingPatWarns) parsedMod
-                    case splitPattern gblRdrEnv (Ghc.bagToList missingPatWarns) ast of
-                      (ps, Any True) ->
-                        -- If the source contains CPP, newlines are appended
-                        -- to the end of the file when exact printing. The simple
-                        -- solution is to remove trailing newlines after exact printing
-                        -- if the source contained CPP comments.
-                        let removeTrailingNewlines
-                              | usesCpp =
-                                  reverse . ('\n' :) . dropWhile (== '\n') . reverse
-                              | otherwise = id
-                            printed = removeTrailingNewlines $ EP.exactPrint ps
-                         in traverse_ (`writeFile` printed) mFilePath
-                      _ -> pure ()
+                    traverse_ (modifyModule gblRdrEnv parsedMod usesCpp missingPatWarns) mFilePath
                   _ -> pure ()
                 throw . Ghc.SourceError $ Ghc.mkMessages otherWarns
               )
         _ -> runPhaseOrExistingHook tPhase
+
+-- | Parse the given module file. Accounts for CPP comments
+parseModule
+  :: Ghc.HscEnv
+  -> Ghc.DynFlags
+  -> String
+  -> IO (EP.ParseResult Ghc.ParsedSource, Bool)
+parseModule env dynFlags filePath = EP.ghcWrapper Paths.libdir $ do
+  Ghc.setSession env { Ghc.hsc_dflags = dynFlags }
+  res <- EP.parseModuleEpAnnsWithCppInternal EP.defaultCppOptions dynFlags filePath
+  let eCppComments = fmap (\(c, _, _) -> c) res
+      hasCpp = case eCppComments of
+                 (Right cs) -> not $ null cs
+                 _ -> False
+  pure
+    ( liftA2 EP.insertCppComments
+        (EP.postParseTransform res)
+        eCppComments
+    , hasCpp
+    )
+
+-- | Applies pattern split transformation and updates the module file.
+modifyModule
+  :: Ghc.GlobalRdrEnv
+  -> Ghc.ParsedSource
+  -> Bool
+  -> Ghc.Bag NonExhaustivePattern
+  -> FilePath
+  -> IO ()
+modifyModule gblRdrEnv parsedMod usesCpp missingPatWarns filePath = do
+  let ast = EP.makeDeltaAst
+          $ searchAndMark (Ghc.bagToList missingPatWarns) parsedMod
+  case splitPattern gblRdrEnv (Ghc.bagToList missingPatWarns) ast of
+    (ps, Any True) ->
+      -- If the source contains CPP, newlines are appended
+      -- to the end of the file when exact printing. The simple
+      -- solution is to remove trailing newlines after exact printing
+      -- if the source contains CPP comments.
+      let removeTrailingNewlines
+            | usesCpp =
+                reverse . ('\n' :) . dropWhile (== '\n') . reverse
+            | otherwise = id
+          printed = removeTrailingNewlines $ EP.exactPrint ps
+       in writeFile filePath printed
+    _ -> pure ()
 
 -- | Diagnostic thrown when case splitting should be attempted.
 data PatternSplitDiag = PatternSplitDiag

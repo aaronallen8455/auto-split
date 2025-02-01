@@ -1,0 +1,9 @@
+{-# LANGUAGE CPP #-}
+main :: IO ()
+main = pure ()
+
+#if true
+test :: Bool -> Bool
+test x = case x of
+  SPLIT -> True
+#endif

@@ -75,12 +75,13 @@ or a cabal project:
 cabal repl my-project --build-depends auto-split --repl-options='-fplugin AutoSplit'
 ```
 
-### Known caveats
+### Known limitations
 
 - A module must pass the type checker for splitting to occur, unless the
   `-fdefer-type-errors` GHC flag is used.
-- Doesn't work well with view patterns
 - Using SPLIT in pattern match will insert patterns for _all_ missing cases in
   the group. It doesn't restrict to the position where SPLIT is used.
+- Doesn't work well with view patterns
+- Doesn't apply to code inside CPP conditional blocks
 - The plugin only supports certain GHC versions with the intention of supporting
   the four latest major releases. Check the cabal file for specifics.

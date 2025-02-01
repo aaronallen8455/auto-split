@@ -88,6 +88,10 @@ executable Case17
     import: attrs
     main-is: Case17.hs
 
+executable Case18
+    import: attrs
+    main-is: Case18.hs
+
 executable LambdaCase1
     import: attrs
     main-is: LambdaCase1.hs
