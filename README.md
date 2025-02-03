@@ -1,10 +1,27 @@
 # auto-split
 
-A GHC plugin that does automatic case splitting.
+A GHC plugin that performs automatic case splitting.
 
-Simply enable the plugin and use `SPLIT` in a pattern match for a case
-statement or function declaration. Compiling the module will then result in
-that pattern match being expanded to cover all missing cases.
+### Usage
+
+This plugin is intended to be used with GHCi or adjacent utilities such as
+`ghcid` and `ghciwatch` as a developement tool, not as a package dependency.
+Here is an example command for starting a REPL for a stack project with the
+`auto-split` plugin enabled:
+
+```
+stack repl my-project --package auto-split --ghci-options='-fplugin AutoSplit'
+```
+
+likewise for a cabal project:
+
+```
+cabal repl my-project --build-depends auto-split --repl-options='-fplugin AutoSplit'
+```
+
+With the plugin enabled, use `SPLIT` in a pattern match for a case statement or
+function declaration. Compiling the module will then result in that pattern
+match being expanded to cover all missing cases.
 
 For example, compiling this module
 
@@ -57,23 +74,8 @@ If case splitting results in constructors or patterns that are not in scope,
 they will be qualified with `NOT_IN_SCOPE`.
 
 Compilation will abort when case splitting occurs since the module file has
-been updated. This is done by having GHC emit a custom error.
-
-### Usage
-
-This plugin is intended to be used with GHCi or related utilities such as
-`ghcid` and `ghciwatch` rather than as a package dependency. Here is an example
-of how to use it in the REPL for a stack project:
-
-```
-stack repl my-project --package auto-split --ghci-options='-fplugin AutoSplit'
-```
-
-or a cabal project:
-
-```
-cabal repl my-project --build-depends auto-split --repl-options='-fplugin AutoSplit'
-```
+been updated. This is done by having GHC emit a custom error. This error does
+not indicate that something went wrong.
 
 ### Known limitations
 
@@ -81,7 +83,8 @@ cabal repl my-project --build-depends auto-split --repl-options='-fplugin AutoSp
   `-fdefer-type-errors` GHC flag is used.
 - Using SPLIT in pattern match will insert patterns for _all_ missing cases in
   the group. It doesn't restrict to the position where SPLIT is used.
-- Doesn't work well with view patterns
+- Doesn't work well with the view patterns syntax extension
 - Doesn't apply to code inside CPP conditional blocks
-- The plugin only supports certain GHC versions with the intention of supporting
-  the four latest major releases. Check the cabal file for specifics.
+- The plugin only supports certain GHC versions with the intent of supporting
+  the four latest release series, i.e. `9.6.*` thru `9.12.*`. The cabal file
+  indicates the currently supported versions.

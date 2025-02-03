@@ -111,7 +111,7 @@ parseModule env dynFlags filePath = EP.ghcWrapper Paths.libdir $ do
   res <- EP.parseModuleEpAnnsWithCppInternal EP.defaultCppOptions dynFlags filePath
   let eCppComments = fmap (\(c, _, _) -> c) res
       hasCpp = case eCppComments of
-                 (Right cs) -> not $ null cs
+                 Right cs -> not $ null cs
                  _ -> False
   pure
     ( liftA2 EP.insertCppComments
