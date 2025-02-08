@@ -81,8 +81,10 @@ not indicate that something went wrong.
 
 - A module must pass the type checker for splitting to occur, unless the
   `-fdefer-type-errors` GHC flag is used.
-- Using SPLIT in pattern match will insert patterns for _all_ missing cases in
-  the group. It doesn't restrict to the position where SPLIT is used.
+- Using `SPLIT` in a pattern match will insert patterns for _all_ missing cases
+  in the group. It doesn't restrict to the position where `SPLIT` is used.
+- If the pattern match where `SPLIT` is being used contains a wildcard case
+  then the plugin will have no effect because there are no missing patterns.
 - Doesn't work well with the view patterns syntax extension
 - Doesn't apply to code inside CPP conditional blocks
 - The plugin only supports certain GHC versions with the intent of supporting

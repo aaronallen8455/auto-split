@@ -1,4 +1,6 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE TypeFamilies #-}
 module AutoSplit.GhcFacade
   ( module Ghc
   , mkParPat'
@@ -16,6 +18,7 @@ module AutoSplit.GhcFacade
   , greToName
   , noLocCpp
   , noExtFieldCpp
+  , pattern UnknownDiagnostic'
   ) where
 
 #if MIN_VERSION_ghc(9,8,0)
@@ -59,6 +62,7 @@ import           Language.Haskell.Syntax.Basic as Ghc
 #if !MIN_VERSION_ghc(9,10,0)
 import           Data.Maybe
 #endif
+import           Data.Typeable
 import qualified Language.Haskell.GHC.ExactPrint as EP
 
 mkParPat' :: Ghc.LPat Ghc.GhcPs -> Ghc.Pat Ghc.GhcPs
@@ -275,4 +279,16 @@ noExtFieldCpp = []
 #else
 noExtFieldCpp :: Ghc.EpAnn a
 noExtFieldCpp = Ghc.noAnn
+#endif
+
+pattern UnknownDiagnostic'
+  :: ()
+  => (Ghc.Diagnostic a, Typeable a)
+  => a
+#if MIN_VERSION_ghc(9,8,0)
+  -> Ghc.UnknownDiagnostic opts
+pattern UnknownDiagnostic' a <- Ghc.UnknownDiagnostic _ a
+#else
+  -> Ghc.UnknownDiagnostic
+pattern UnknownDiagnostic' a <- Ghc.UnknownDiagnostic a
 #endif

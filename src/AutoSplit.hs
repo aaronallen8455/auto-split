@@ -13,10 +13,13 @@ import           Data.Functor
 import qualified Data.Generics as Syb
 import           Data.IORef
 import qualified Data.List as List
+#if MIN_VERSION_ghc(9,12,0)
 import qualified Data.List.NonEmpty as NE
+#endif
 import           Data.Maybe
 import           Data.Monoid (Any(..))
 import           Data.String (IsString, fromString)
+import qualified Data.Typeable as Typeable
 import qualified GHC.Paths as Paths
 import qualified Language.Haskell.GHC.ExactPrint as EP
 import qualified Language.Haskell.GHC.ExactPrint.Parsers as EP
@@ -58,6 +61,11 @@ addDsHook hscEnv = hscEnv
                   , srcCodeLoc = srcSpan
                   }
               _ -> Right msgEnv
+          isAutoSplitError msgEnv =
+            case Ghc.errMsgDiagnostic msgEnv of
+              Ghc.GhcUnknownMessage (Ghc.UnknownDiagnostic' a)
+                | Just PatternSplitDiag <- Typeable.cast a -> True
+              _ -> False
           runPhaseOrExistingHook :: Ghc.TPhase res -> IO res
           runPhaseOrExistingHook = maybe Ghc.runPhase (\(Ghc.PhaseHook h) -> h) mExistingHook
       case tPhase of
@@ -65,39 +73,53 @@ addDsHook hscEnv = hscEnv
           usedGres <- readIORef $ Ghc.tcg_used_gres gblEnv
           let usesSplit = any ((== splitName) . Ghc.occNameFS . Ghc.occName . Ghc.gre_name) usedGres
               mFilePath = Ghc.ml_hs_file (Ghc.ms_location modSum)
-          if not usesSplit
-          then runPhaseOrExistingHook tPhase
-          else do
-            let customError =
-                  Ghc.mkPlainErrorMsgEnvelope
-                    (maybe Ghc.noSrcSpan (Ghc.mkGeneralSrcSpan . fromString) mFilePath)
-                    (Ghc.ghcUnknownMessage PatternSplitDiag)
-                warnsWithError = Ghc.addMessage customError warns
-                -- Plugin only functions if incomplete patterns warning is enabled, so we force it on.
-                updEnv = env
-                  -- Plugin only functions if incomplete patterns warning is enabled, so we force it on.
-                  -- If this is instead done as driver plugin, ghci sessions won't pick it up.
-                  { Ghc.hsc_dflags = (Ghc.hsc_dflags env `Ghc.wopt_set` Ghc.Opt_WarnIncompletePatterns)
-                    -- Need to override the number of uncovered patterns reported.
-                    { Ghc.maxUncoveredPatterns = maxBound - 1 }
-                  }
-            catch
-              (runPhaseOrExistingHook $ Ghc.T_HscPostTc updEnv modSum tcResult warnsWithError mOldHash)
-              (\(Ghc.SourceError msgs) -> do
-                let (missingPatWarns, otherWarns) = Ghc.partitionBagWith isMissingPatWarn (Ghc.getMessages msgs)
-                    -- Need to parse the module because GHC removes
-                    -- ParsedResult from ModSummary after the frontend finishes.
-                    -- Use the options from compilation to parse the module, otherwise certain
-                    -- syntax extensions won't parse correctly.
-                    dynFlags = Ghc.ms_hspp_opts modSum `Ghc.gopt_set` Ghc.Opt_KeepRawTokenStream
-                eResult <- traverse (parseModule env dynFlags) mFilePath
-                case eResult of
-                  Just (Right parsedMod, usesCpp) -> do
-                    let gblRdrEnv = Ghc.tcg_rdr_env gblEnv
-                    traverse_ (modifyModule gblRdrEnv parsedMod usesCpp missingPatWarns) mFilePath
-                  _ -> pure ()
-                throw . Ghc.SourceError $ Ghc.mkMessages otherWarns
-              )
+          case mFilePath of
+            Just filePath | usesSplit -> do
+              let patSplitErr =
+                    Ghc.mkPlainErrorMsgEnvelope
+                      (Ghc.mkGeneralSrcSpan $ fromString filePath)
+                      (Ghc.ghcUnknownMessage PatternSplitDiag)
+                  noMissingPatErr =
+                    Ghc.mkPlainErrorMsgEnvelope
+                      (Ghc.mkGeneralSrcSpan $ fromString filePath)
+                      (Ghc.ghcUnknownMessage NoMissingPat)
+                  parseFailedErr =
+                    Ghc.mkPlainErrorMsgEnvelope
+                      (Ghc.mkGeneralSrcSpan $ fromString filePath)
+                      (Ghc.ghcUnknownMessage ParseFailed)
+                  warnsWithError = Ghc.addMessage patSplitErr warns
+                  updEnv = env
+                    -- Plugin only functions if incomplete patterns warning is enabled, so we force it on.
+                    -- If this is instead done as driver plugin, ghci sessions won't pick it up.
+                    { Ghc.hsc_dflags = (Ghc.hsc_dflags env `Ghc.wopt_set` Ghc.Opt_WarnIncompletePatterns)
+                      -- Need to override the number of uncovered patterns reported.
+                      { Ghc.maxUncoveredPatterns = maxBound - 1 }
+                    }
+              catch
+                (runPhaseOrExistingHook $ Ghc.T_HscPostTc updEnv modSum tcResult warnsWithError mOldHash)
+                (\(Ghc.SourceError msgs) -> do
+                  let (missingPatWarns, otherDiags) = Ghc.partitionBagWith isMissingPatWarn (Ghc.getMessages msgs)
+                      -- Need to parse the module because GHC removes
+                      -- ParsedResult from ModSummary after the frontend finishes.
+                      -- Use the options from compilation to parse the module, otherwise certain
+                      -- syntax extensions won't parse correctly.
+                      dynFlags = Ghc.ms_hspp_opts modSum `Ghc.gopt_set` Ghc.Opt_KeepRawTokenStream
+                  eResult <- parseModule env dynFlags filePath
+                  case eResult of
+                    (Right parsedMod, usesCpp)
+                      | not (null missingPatWarns) -> do
+                          let gblRdrEnv = Ghc.tcg_rdr_env gblEnv
+                          modifyModule gblRdrEnv parsedMod usesCpp missingPatWarns filePath
+                          throw . Ghc.SourceError $ Ghc.mkMessages otherDiags
+                      | otherwise -> throw . Ghc.SourceError . Ghc.mkMessages
+                                   . Ghc.consBag noMissingPatErr
+                                   $ Ghc.filterBag (not . isAutoSplitError) otherDiags
+                    (Left _, _) ->
+                      throw . Ghc.SourceError . Ghc.mkMessages
+                            . Ghc.consBag parseFailedErr
+                            $ Ghc.filterBag (not . isAutoSplitError) otherDiags
+                )
+            _ -> runPhaseOrExistingHook tPhase -- no SPLIT or no file path
         _ -> runPhaseOrExistingHook tPhase
 
 -- | Parse the given module file. Accounts for CPP comments
@@ -152,6 +174,34 @@ instance Ghc.Diagnostic PatternSplitDiag where
   type DiagnosticOpts PatternSplitDiag = Ghc.NoDiagnosticOpts
   diagnosticMessage _ _ = Ghc.mkSimpleDecorated $
     Ghc.text "Module updated by auto-split, compilation aborted"
+  diagnosticReason _ = Ghc.ErrorWithoutFlag
+  diagnosticHints _ = []
+  diagnosticCode _ = Nothing
+#if !MIN_VERSION_ghc(9,8,0)
+  defaultDiagnosticOpts = Ghc.NoDiagnosticOpts
+#endif
+
+-- | Diagnostic thrown when SPLIT is used but there are no resulting warnings
+data NoMissingPat = NoMissingPat
+
+instance Ghc.Diagnostic NoMissingPat where
+  type DiagnosticOpts NoMissingPat = Ghc.NoDiagnosticOpts
+  diagnosticMessage _ _ = Ghc.mkSimpleDecorated $
+    Ghc.text "Module was not updated because all cases are already covered where SPLIT occurs"
+  diagnosticReason _ = Ghc.ErrorWithoutFlag
+  diagnosticHints _ = []
+  diagnosticCode _ = Nothing
+#if !MIN_VERSION_ghc(9,8,0)
+  defaultDiagnosticOpts = Ghc.NoDiagnosticOpts
+#endif
+
+-- | Diagnostic thrown if the module fails to parse
+data ParseFailed = ParseFailed
+
+instance Ghc.Diagnostic ParseFailed where
+  type DiagnosticOpts ParseFailed = Ghc.NoDiagnosticOpts
+  diagnosticMessage _ _ = Ghc.mkSimpleDecorated $
+    Ghc.text "auto-split failed to parse the module"
   diagnosticReason _ = Ghc.ErrorWithoutFlag
   diagnosticHints _ = []
   diagnosticCode _ = Nothing

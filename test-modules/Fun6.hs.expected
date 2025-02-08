@@ -1,0 +1,10 @@
+import Import
+
+main :: IO ()
+main = pure ()
+
+test :: Maybe Foo -> Bool
+test (Just Foo) = True
+test (Just Bar) = True
+test (Just Baz) = True
+test Nothing = False

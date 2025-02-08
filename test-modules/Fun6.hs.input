@@ -1,0 +1,8 @@
+import Import
+
+main :: IO ()
+main = pure ()
+
+test :: Maybe Foo -> Bool
+test (Just SPLIT) = True
+test Nothing = False

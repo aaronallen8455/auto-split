@@ -92,6 +92,10 @@ executable Case18
     import: attrs
     main-is: Case18.hs
 
+executable Case19
+    import: attrs
+    main-is: Case19.hs
+
 executable LambdaCase1
     import: attrs
     main-is: LambdaCase1.hs
@@ -128,4 +132,9 @@ executable Fun4
 executable Fun5
     import: attrs
     main-is: Fun5.hs
+    other-modules: Import
+
+executable Fun6
+    import: attrs
+    main-is: Fun6.hs
     other-modules: Import
