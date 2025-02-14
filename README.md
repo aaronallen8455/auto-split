@@ -7,13 +7,14 @@ A GHC plugin that performs automatic case splitting.
 This plugin is intended to be used with GHCi or adjacent utilities such as
 `ghcid` and `ghciwatch` as a developement tool, not as a package dependency.
 Here is an example command for starting a REPL for a stack project with the
-`auto-split` plugin enabled:
+`auto-split` plugin enabled (you may need to add `auto-split` to your
+`extra-deps` first):
 
 ```
 stack repl my-project --package auto-split --ghci-options='-fplugin AutoSplit'
 ```
 
-likewise for a cabal project:
+likewise for a cabal project (you may need to run `cabal update` first):
 
 ```
 cabal repl my-project --build-depends auto-split --repl-options='-fplugin AutoSplit'
