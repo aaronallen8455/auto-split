@@ -1,4 +1,4 @@
-# auto-split
+# auto-split 🤸
 
 A GHC plugin that performs automatic case splitting.
 
@@ -83,8 +83,9 @@ not indicate that something went wrong.
   `-fdefer-type-errors` GHC flag is used.
 - Using `SPLIT` in a pattern match will insert patterns for _all_ missing cases
   in the group. It doesn't restrict to the position where `SPLIT` is used.
-- If the pattern match where `SPLIT` is being used contains a wildcard case
-  then the plugin will have no effect because there are no missing patterns.
+- If the pattern match where `SPLIT` is being used contains a catch-all
+  wildcard case then the plugin will have no effect because there are no
+  missing patterns.
 - Doesn't work well with the view patterns syntax extension
 - Doesn't apply to code inside CPP conditional blocks
 - The plugin only supports certain GHC versions with the intent of supporting
