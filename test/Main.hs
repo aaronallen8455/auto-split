@@ -34,10 +34,13 @@ main = defaultMain $ testGroup "Tests"
     ]
   , testGroup "lambda case"
     [ testCase "1" $ runTest "LambdaCase1.hs"
+    , testCase "2" $ runTest "LambdaCase2.hs"
     ]
   , testGroup "lambda cases"
     [ testCase "1" $ runTest "LambdaCases1.hs"
     , testCase "2" $ runTest "LambdaCases2.hs"
+    , testCase "3" $ runTest "LambdaCases3.hs"
+    , testCase "4" $ runTest "LambdaCases4.hs"
     ]
   , testGroup "fun cases"
     [ testCase "1" $ runTest "Fun1.hs"

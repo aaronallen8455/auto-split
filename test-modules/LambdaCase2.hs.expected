@@ -1,0 +1,9 @@
+module LambdaCase1 where
+
+main :: IO ()
+main = pure ()
+
+test :: Maybe Bool -> Bool
+test = \case
+  Nothing -> False
+  Just _ -> False

@@ -100,6 +100,10 @@ executable LambdaCase1
     import: attrs
     main-is: LambdaCase1.hs
 
+executable LambdaCase2
+    import: attrs
+    main-is: LambdaCase2.hs
+
 executable LambdaCases1
     import: attrs
     main-is: LambdaCases1.hs
@@ -107,6 +111,14 @@ executable LambdaCases1
 executable LambdaCases2
     import: attrs
     main-is: LambdaCases2.hs
+
+executable LambdaCases3
+    import: attrs
+    main-is: LambdaCases3.hs
+
+executable LambdaCases4
+    import: attrs
+    main-is: LambdaCases4.hs
 
 executable Fun1
     import: attrs

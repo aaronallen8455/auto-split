@@ -54,12 +54,12 @@ addDsHook hscEnv = hscEnv
       let isMissingPatWarn msgEnv =
             case Ghc.errMsgDiagnostic msgEnv of
               Ghc.GhcDsMessage (Ghc.DsNonExhaustivePatterns _ _ _ patIds nablas)
-                | Just srcSpan <- Ghc.srcSpanToRealSrcSpan (Ghc.errMsgSpan msgEnv) -> Left
-                NonExhaustivePattern
-                  { patternIds = patIds
-                  , patternNablas = nablas
-                  , srcCodeLoc = srcSpan
-                  }
+                | Just srcSpan <- Ghc.srcSpanToRealSrcSpan (Ghc.errMsgSpan msgEnv) ->
+                    Left NonExhaustivePatterns
+                      { patternIds = patIds
+                      , patternNablas = nablas
+                      , srcCodeLoc = srcSpan
+                      }
               _ -> Right msgEnv
           isAutoSplitError msgEnv =
             case Ghc.errMsgDiagnostic msgEnv of
@@ -147,7 +147,7 @@ modifyModule
   :: Ghc.GlobalRdrEnv
   -> Ghc.ParsedSource
   -> Bool
-  -> Ghc.Bag NonExhaustivePattern
+  -> Ghc.Bag NonExhaustivePatterns
   -> FilePath
   -> IO ()
 modifyModule gblRdrEnv parsedMod usesCpp missingPatWarns filePath = do
@@ -209,7 +209,7 @@ instance Ghc.Diagnostic ParseFailed where
   defaultDiagnosticOpts = Ghc.NoDiagnosticOpts
 #endif
 
-data NonExhaustivePattern = NonExhaustivePattern
+data NonExhaustivePatterns = NonExhaustivePatterns
   { patternIds :: [Ghc.Id]
   , patternNablas :: [Ghc.Nabla]
   , srcCodeLoc :: Ghc.RealSrcSpan
@@ -221,7 +221,7 @@ data NonExhaustivePattern = NonExhaustivePattern
 -- are removed by delta transformation.
 -- Problematic if delta moves comments to a different node, hopefully it won't.
 searchAndMark
-  :: [NonExhaustivePattern]
+  :: [NonExhaustivePatterns]
   -> Ghc.ParsedSource
   -> Ghc.ParsedSource
 searchAndMark nePats =
@@ -273,7 +273,7 @@ searchAndMark nePats =
 -- Applied post delta transformation.
 splitPattern
   :: Ghc.GlobalRdrEnv
-  -> [NonExhaustivePattern]
+  -> [NonExhaustivePatterns]
   -> Ghc.ParsedSource
   -> (Ghc.ParsedSource, Any)
 splitPattern gblRdrEnv nePats ps =
@@ -310,7 +310,7 @@ splitPattern gblRdrEnv nePats ps =
     | lamType /= Ghc.LamSingle
     , Just (neIdx, otherComms) <- extractIdxComment (Ghc.comments ann)
     , Just nePat <- nePats List.!? neIdx
-    , Just newMG <- splitMG gblRdrEnv True False (Ghc.colDelta matchesAnn) nePat matchGroup
+    , Just newMG <- splitMG gblRdrEnv (lamType == Ghc.LamCases) False (Ghc.colDelta matchesAnn) nePat matchGroup
     = ( Ghc.L ann {Ghc.comments = otherComms} (Ghc.HsLam x lamType newMG)
       , Any True
       )
@@ -318,7 +318,7 @@ splitPattern gblRdrEnv nePats ps =
   goExpr (Ghc.L ann (Ghc.HsLamCase x lamType matchGroup@(Ghc.MG _ (Ghc.L matchesAnn _))))
     | Just (neIdx, otherComms) <- extractIdxComment (Ghc.getComments ann)
     , Just nePat <- listToMaybe $ drop neIdx nePats
-    , Just newMG <- splitMG gblRdrEnv True False (Ghc.colDelta matchesAnn) nePat matchGroup
+    , Just newMG <- splitMG gblRdrEnv (lamType == Ghc.LamCases) False (Ghc.colDelta matchesAnn) nePat matchGroup
     = ( Ghc.L (Ghc.setComments otherComms mempty ann) (Ghc.HsLamCase x lamType newMG)
       , Any True
       )
@@ -350,7 +350,7 @@ splitMG
   -> Bool -- True => match group can have multiple patterns
   -> Bool -- True => add left padding to each new pattern
   -> Int -- Number of horizontal spaces at the front of inserted pattern match
-  -> NonExhaustivePattern
+  -> NonExhaustivePatterns
   -> Ghc.MatchGroup Ghc.GhcPs (Ghc.LHsExpr Ghc.GhcPs)
   -> Maybe (Ghc.MatchGroup Ghc.GhcPs (Ghc.LHsExpr Ghc.GhcPs))
 splitMG gblRdrEnv multiplePats offsetFirstPat colOffset nePat (Ghc.MG x2 (Ghc.L ann2 matches))
@@ -498,12 +498,12 @@ addImport result = result
         { Ghc.hpm_module = Ghc.hpm_module resMod <&> \pMod ->
             pMod
               { Ghc.hsmodImports =
-                  caseXImport : Ghc.hsmodImports pMod
+                  patternImport : Ghc.hsmodImports pMod
               }
         }
   }
   where
-    caseXImport = Ghc.noLocA . Ghc.simpleImportDecl $ Ghc.mkModuleName patternModName
+    patternImport = Ghc.noLocA . Ghc.simpleImportDecl $ Ghc.mkModuleName patternModName
 
 -- | The automatically added import gets flagged as unused even if it is used.
 -- The solution here is to simply suppress the warning.

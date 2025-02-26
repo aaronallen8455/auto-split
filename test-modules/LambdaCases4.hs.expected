@@ -1,0 +1,7 @@
+main :: IO ()
+main = pure ()
+
+test :: Bool -> Maybe Bool -> Bool
+test = \cases
+  _ Nothing -> False
+  _ (Just _) -> False
