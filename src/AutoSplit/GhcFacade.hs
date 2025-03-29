@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -18,6 +20,7 @@ module AutoSplit.GhcFacade
   , greToName
   , noLocCpp
   , noExtFieldCpp
+  , equalsAnns
   , pattern UnknownDiagnostic'
   ) where
 
@@ -93,7 +96,12 @@ anchorD1
   :: Ghc.NoAnn ann => Ghc.EpAnn ann
 anchorD1 = Ghc.EpAnn EP.d1 Ghc.noAnn Ghc.emptyComments
 #elif MIN_VERSION_ghc(9,6,0)
-  :: Ghc.SrcSpanAnnA
+  :: Monoid ann => Ghc.SrcAnn ann
+
+-- damnit...
+instance Monoid Ghc.NoEpAnns where
+  mempty = Ghc.NoEpAnns
+
 anchorD1 =
   Ghc.SrcSpanAnn
     (Ghc.EpAnn
@@ -212,6 +220,21 @@ fakeCommentLocation = Ghc.EpaDelta (Ghc.DifferentLine (-1) 0) Ghc.NoComments
 #elif MIN_VERSION_ghc(9,6,0)
   :: Ghc.Anchor
 fakeCommentLocation = Ghc.Anchor Ghc.placeholderRealSpan (Ghc.MovedAnchor (Ghc.DifferentLine (-1) 0))
+#endif
+
+#if MIN_VERSION_ghc(9,12,0)
+equalsAnns :: Maybe (Ghc.EpToken "=")
+equalsAnns = Just (Ghc.EpTok EP.d1)
+#elif MIN_VERSION_ghc(9,10,0)
+equalsAnns :: [Ghc.AddEpAnn]
+equalsAnns = [Ghc.AddEpAnn Ghc.AnnEqual EP.d1]
+#else
+equalsAnns :: Ghc.EpAnn [Ghc.AddEpAnn]
+equalsAnns = Ghc.EpAnn
+  { Ghc.entry = Ghc.Anchor Ghc.placeholderRealSpan EP.m0
+  , Ghc.anns = [ Ghc.AddEpAnn Ghc.AnnEqual EP.d1 ]
+  , Ghc.comments = Ghc.emptyComments
+  }
 #endif
 
 #if MIN_VERSION_ghc(9,12,0)

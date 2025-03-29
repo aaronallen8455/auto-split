@@ -1,11 +1,13 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE RecordWildCards #-}
 module AutoSplit
   ( plugin
   ) where
 
 import           Control.Exception
+import           Control.Monad
 import qualified Control.Monad.Trans.Writer.CPS as Writer
 import qualified Data.Char as Char
 import           Data.Foldable
@@ -61,11 +63,34 @@ addDsHook hscEnv = hscEnv
                       , srcCodeLoc = srcSpan
                       }
               _ -> Right msgEnv
+          isMissingFieldsErr msgEnv =
+            case Ghc.errMsgDiagnostic msgEnv of
+              Ghc.GhcTcRnMessage (Ghc.TcRnMessageWithInfo _ (Ghc.TcRnMessageDetailed _ (Ghc.TcRnMissingFields conLike _fields)))
+                | Just srcSpan <- Ghc.srcSpanToRealSrcSpan (Ghc.errMsgSpan msgEnv) ->
+                    Left MissingFields
+                      { mfConLike = conLike
+                      , mfSrcCodeLoc = srcSpan
+                      }
+              Ghc.GhcTcRnMessage (Ghc.TcRnMessageWithInfo _ (Ghc.TcRnMessageDetailed _ (Ghc.TcRnMissingStrictFields conLike _fields)))
+                | Just srcSpan <- Ghc.srcSpanToRealSrcSpan (Ghc.errMsgSpan msgEnv) ->
+                    Left MissingFields
+                      { mfConLike = conLike
+                      , mfSrcCodeLoc = srcSpan
+                      }
+              _ -> Right msgEnv
           isAutoSplitError msgEnv =
             case Ghc.errMsgDiagnostic msgEnv of
               Ghc.GhcUnknownMessage (Ghc.UnknownDiagnostic' a)
                 | Just PatternSplitDiag <- Typeable.cast a -> True
               _ -> False
+          parseFailedErr filePath =
+            Ghc.mkPlainErrorMsgEnvelope
+              (Ghc.mkGeneralSrcSpan $ fromString filePath)
+              (Ghc.ghcUnknownMessage ParseFailed)
+          patSplitErr filePath =
+            Ghc.mkPlainErrorMsgEnvelope
+              (Ghc.mkGeneralSrcSpan $ fromString filePath)
+              (Ghc.ghcUnknownMessage PatternSplitDiag)
           runPhaseOrExistingHook :: Ghc.TPhase res -> IO res
           runPhaseOrExistingHook = maybe Ghc.runPhase (\(Ghc.PhaseHook h) -> h) mExistingHook
       case tPhase of
@@ -75,19 +100,11 @@ addDsHook hscEnv = hscEnv
               mFilePath = Ghc.ml_hs_file (Ghc.ms_location modSum)
           case mFilePath of
             Just filePath | usesSplit -> do
-              let patSplitErr =
-                    Ghc.mkPlainErrorMsgEnvelope
-                      (Ghc.mkGeneralSrcSpan $ fromString filePath)
-                      (Ghc.ghcUnknownMessage PatternSplitDiag)
-                  noMissingPatErr =
+              let noMissingPatErr =
                     Ghc.mkPlainErrorMsgEnvelope
                       (Ghc.mkGeneralSrcSpan $ fromString filePath)
                       (Ghc.ghcUnknownMessage NoMissingPat)
-                  parseFailedErr =
-                    Ghc.mkPlainErrorMsgEnvelope
-                      (Ghc.mkGeneralSrcSpan $ fromString filePath)
-                      (Ghc.ghcUnknownMessage ParseFailed)
-                  warnsWithError = Ghc.addMessage patSplitErr warns
+                  warnsWithError = Ghc.addMessage (patSplitErr filePath) warns
                   updEnv = env
                     -- Plugin only functions if incomplete patterns warning is enabled, so we force it on.
                     -- If this is instead done as driver plugin, ghci sessions won't pick it up.
@@ -116,10 +133,62 @@ addDsHook hscEnv = hscEnv
                                    $ Ghc.filterBag (not . isAutoSplitError) otherDiags
                     (Left _, _) ->
                       throw . Ghc.SourceError . Ghc.mkMessages
-                            . Ghc.consBag parseFailedErr
+                            . Ghc.consBag (parseFailedErr filePath)
                             $ Ghc.filterBag (not . isAutoSplitError) otherDiags
                 )
             _ -> runPhaseOrExistingHook tPhase -- no SPLIT or no file path
+
+        -- Missing fields
+        Ghc.T_Hsc env modSum -> do
+          gblEnvRef <- newIORef Nothing :: IO (IORef (Maybe Ghc.TcGblEnv))
+          let rnPlugin =
+                Ghc.defaultPlugin
+                { Ghc.renamedResultAction = \_ gblEnv group -> do
+                    Ghc.liftIO $ writeIORef gblEnvRef (Just gblEnv)
+                    pure (gblEnv, group)
+                }
+              staticPlugin = Ghc.StaticPlugin
+                { Ghc.spPlugin = Ghc.PluginWithArgs rnPlugin []
+#if MIN_VERSION_ghc(9,12,0)
+                , Ghc.spInitialised = True
+#endif
+                }
+              envWithPlugin = env
+                { Ghc.hsc_plugins = let ps = Ghc.hsc_plugins env in ps
+                  { Ghc.staticPlugins = staticPlugin : Ghc.staticPlugins ps }
+                }
+          eTcRes <- try . runPhaseOrExistingHook $ Ghc.T_Hsc envWithPlugin modSum
+          let msgs = case eTcRes of
+                Right (_res, m) -> m
+                Left (Ghc.SourceError m) -> m
+              result = case eTcRes of
+                Right res -> pure res
+                Left err -> throw err
+          mGblEnv <- readIORef gblEnvRef
+          case mGblEnv of
+            Nothing -> result -- renaming failed
+            Just gblEnv -> do
+              usedGres <- readIORef $ Ghc.tcg_used_gres gblEnv
+              let usesFields = any ((== fieldsName) . Ghc.occNameFS . Ghc.occName . Ghc.gre_name) usedGres
+                  mFilePath = Ghc.ml_hs_file (Ghc.ms_location modSum)
+                  (missingFields, otherDiags) = Ghc.partitionBagWith isMissingFieldsErr (Ghc.getMessages msgs)
+              case mFilePath of
+                Just filePath | usesFields, not (null missingFields) -> do
+                  -- Parse module
+                  let dynFlags = Ghc.ms_hspp_opts modSum `Ghc.gopt_set` Ghc.Opt_KeepRawTokenStream
+                  eParseRes <- parseModule env dynFlags filePath
+                  case eParseRes of
+                    (Right parsedMod, usesCpp) -> do
+                      let gblRdrEnv = Ghc.tcg_rdr_env gblEnv
+                      modifyModuleFields gblRdrEnv parsedMod usesCpp missingFields filePath
+                      -- TODO use different error if module was not actually updated
+                      throw . Ghc.SourceError . Ghc.mkMessages
+                            $ Ghc.consBag (patSplitErr filePath) otherDiags
+                    (Left _, _) ->
+                      throw . Ghc.SourceError . Ghc.mkMessages
+                            $ Ghc.consBag (parseFailedErr filePath) otherDiags
+                _ -> result -- no FIELDS or no file path
+
         _ -> runPhaseOrExistingHook tPhase
 
 -- | Parse the given module file. Accounts for CPP comments
@@ -154,6 +223,31 @@ modifyModule gblRdrEnv parsedMod usesCpp missingPatWarns filePath = do
   let ast = EP.makeDeltaAst
           $ searchAndMark (Ghc.bagToList missingPatWarns) parsedMod
   case splitPattern gblRdrEnv (Ghc.bagToList missingPatWarns) ast of
+    (ps, Any True) ->
+      -- If the source contains CPP, newlines are appended
+      -- to the end of the file when exact printing. The simple
+      -- solution is to remove trailing newlines after exact printing
+      -- if the source contains CPP comments.
+      let removeTrailingNewlines
+            | usesCpp =
+                reverse . ('\n' :) . dropWhile (== '\n') . reverse
+            | otherwise = id
+          printed = removeTrailingNewlines $ EP.exactPrint ps
+       in writeFile filePath printed
+    _ -> pure ()
+
+-- | Applies field enumeration transformation and updates the module file.
+modifyModuleFields
+  :: Ghc.GlobalRdrEnv
+  -> Ghc.ParsedSource
+  -> Bool
+  -> Ghc.Bag MissingFields
+  -> FilePath
+  -> IO ()
+modifyModuleFields gblRdrEnv parsedMod usesCpp missingFields filePath = do
+  let ast = EP.makeDeltaAst
+          $ searchAndMarkFields (Ghc.bagToList missingFields) parsedMod
+  case enumFields gblRdrEnv (Ghc.bagToList missingFields) ast of
     (ps, Any True) ->
       -- If the source contains CPP, newlines are appended
       -- to the end of the file when exact printing. The simple
@@ -215,6 +309,11 @@ data NonExhaustivePatterns = NonExhaustivePatterns
   , srcCodeLoc :: Ghc.RealSrcSpan
   }
 
+data MissingFields = MissingFields
+  { mfConLike :: Ghc.ConLike
+  , mfSrcCodeLoc :: Ghc.RealSrcSpan
+  }
+
 -- | Before applying delta transformation, find the expressions that go with
 -- non exhaustive patterns and mark them with a special comment containing the
 -- index of that pattern. This must be done first because source code locations
@@ -260,14 +359,104 @@ searchAndMark nePats =
     = Ghc.L (addIndexComment ann neIdx) f
   goBind x = x
 
-  addIndexComment ann neIdx =
-    let com :: Ghc.LEpaComment
-        com = Ghc.L Ghc.fakeCommentLocation
-          (Ghc.EpaComment (Ghc.EpaLineComment (show neIdx)) Ghc.placeholderRealSpan)
-        newComms = case Ghc.getComments ann of
-          Ghc.EpaComments cs -> Ghc.EpaComments $ com : cs
-          Ghc.EpaCommentsBalanced cs1 cs2 -> Ghc.EpaCommentsBalanced (com : cs1) cs2
-     in Ghc.setComments newComms mempty ann
+searchAndMarkFields
+  :: [MissingFields]
+  -> Ghc.ParsedSource
+  -> Ghc.ParsedSource
+searchAndMarkFields missingFields =
+    Syb.everywhere (Syb.mkT goExpr)
+  where
+  goExpr :: Ghc.LHsExpr Ghc.GhcPs -> Ghc.LHsExpr Ghc.GhcPs
+  goExpr (Ghc.L outerAnn
+           a@(Ghc.HsApp _
+               (Ghc.L _ (Ghc.HsVar _ (Ghc.L _ rdrName)))
+               (Ghc.L ann Ghc.RecordCon{}))
+         )
+    | Ghc.rdrNameOcc rdrName == Ghc.mkDataOcc fieldsName
+    , Just caseLoc <- Ghc.srcSpanToRealSrcSpan $ Ghc.locA ann
+    , Just neIdx <- List.findIndex ((caseLoc ==) . mfSrcCodeLoc) missingFields
+    = Ghc.L (addIndexComment outerAnn neIdx) a
+  goExpr x = x
+
+enumFields
+  :: Ghc.GlobalRdrEnv
+  -> [MissingFields]
+  -> Ghc.ParsedSource
+  -> (Ghc.ParsedSource, Any)
+enumFields gblRdrEnv missingFields ps =
+    Writer.runWriter $
+      Syb.everywhereM ( Syb.mkM (Writer.writer . goExpr)) ps
+  where
+    -- TODO share with split
+  isIdxComment (Ghc.L _ (Ghc.EpaComment (Ghc.EpaLineComment str) realSpan))
+    = realSpan == Ghc.placeholderRealSpan && all Char.isDigit str
+  isIdxComment _ = False
+
+  extractIdxComment (Ghc.EpaComments comms)
+    | (before, Ghc.L _ (Ghc.EpaComment (Ghc.EpaLineComment str) _) : rest)
+        <- break isIdxComment comms
+    , Just idx <- readMaybe str
+    , let newComments = Ghc.EpaComments $ before ++ rest
+    = Just (idx, newComments)
+  extractIdxComment Ghc.EpaCommentsBalanced{} = Nothing
+  extractIdxComment _ = Nothing
+
+  goExpr :: Ghc.LHsExpr Ghc.GhcPs -> (Ghc.LHsExpr Ghc.GhcPs, Any)
+  goExpr (Ghc.L outerAnn
+           -- Need to combine the comments from the outer ann with the inner
+           -- ann. Should use position from outer ann.
+           -- Could just not fret over the inner comments? Need to test that.
+           (Ghc.HsApp _
+             (Ghc.L _ (Ghc.HsVar _ _))
+             (Ghc.L _ann (Ghc.RecordCon x cLike (Ghc.HsRecFields{..}))))
+         )
+    | Just (neIdx, otherComms) <- extractIdxComment (Ghc.getComments outerAnn)
+    , Just mf <- listToMaybe $ drop neIdx missingFields
+    , let newFields = addMissingFields gblRdrEnv mf rec_flds
+    = ( Ghc.L (Ghc.setComments otherComms mempty outerAnn) (Ghc.RecordCon x cLike
+          (Ghc.HsRecFields {Ghc.rec_flds = newFields, ..}))
+      , Any True
+      )
+  goExpr x = (x, Any False)
+
+addMissingFields
+  :: Ghc.GlobalRdrEnv
+  -> MissingFields
+  -> [Ghc.LHsRecField Ghc.GhcPs (Ghc.LHsExpr Ghc.GhcPs)]
+  -> [Ghc.LHsRecField Ghc.GhcPs (Ghc.LHsExpr Ghc.GhcPs)]
+addMissingFields gblRdrEnv missingFields existing =
+  let fieldNames = Ghc.flSelector
+               <$> Ghc.conLikeFieldLabels (mfConLike missingFields) :: [Ghc.Name]
+      existingOccNames =
+        Ghc.occNameFS . Ghc.rdrNameOcc . Ghc.unLoc . Ghc.foLabel
+        . Ghc.unLoc . Ghc.hfbLHS . Ghc.unLoc <$> existing
+      toFieldBind :: Ghc.Name -> Maybe (Ghc.LHsRecField Ghc.GhcPs (Ghc.LHsExpr Ghc.GhcPs))
+      toFieldBind name = do
+        guard $ Ghc.getOccFS name `notElem` existingOccNames
+        Just $ Ghc.noLocA
+          Ghc.HsFieldBind
+          { Ghc.hfbAnn = Ghc.equalsAnns
+          , Ghc.hfbLHS = Ghc.L Ghc.anchorD1 $ Ghc.FieldOcc Ghc.noExtField (Ghc.noLocA $ nameToRdrName gblRdrEnv name)
+          , Ghc.hfbRHS = Ghc.L Ghc.anchorD1 $ Ghc.HsVar Ghc.noExtField (Ghc.noLocA . Ghc.mkRdrUnqual $ Ghc.mkVarOcc "_")
+          , Ghc.hfbPun = False
+          }
+   in case reverse existing of
+        (r : rs) -> reverse rs ++ addCommaAnns (r : mapMaybe toFieldBind fieldNames)
+        _ -> addCommaAnns (mapMaybe toFieldBind fieldNames)
+
+#if MIN_VERSION_ghc(9,10,0)
+addIndexComment :: Ghc.EpAnn ann -> Int -> Ghc.EpAnn ann
+#else
+addIndexComment :: Monoid ann => Ghc.SrcSpanAnn' (Ghc.EpAnn ann) -> Int -> Ghc.SrcSpanAnn' (Ghc.EpAnn ann)
+#endif
+addIndexComment ann neIdx =
+  let com :: Ghc.LEpaComment
+      com = Ghc.L Ghc.fakeCommentLocation
+        (Ghc.EpaComment (Ghc.EpaLineComment (show neIdx)) Ghc.placeholderRealSpan)
+      newComms = case Ghc.getComments ann of
+        Ghc.EpaComments cs -> Ghc.EpaComments $ com : cs
+        Ghc.EpaCommentsBalanced cs1 cs2 -> Ghc.EpaCommentsBalanced (com : cs1) cs2
+   in Ghc.setComments newComms mempty ann
 
 -- | Finds the target pattern and splits it. Returns the modified source and True if successful.
 -- Applied post delta transformation.
@@ -484,9 +673,11 @@ mkPat gblRdrEnv nabla isOutermost needsLeftPad x = Ghc.L delta $
       if not isOutermost
       then Ghc.mkParPat' (Ghc.L Ghc.anchorD0 inner)
       else inner
-    addCommaAnns [] = []
-    addCommaAnns [a] = [a]
-    addCommaAnns (Ghc.L epAnn a : rest) = Ghc.L (EP.addComma epAnn) a : addCommaAnns rest
+
+addCommaAnns :: [Ghc.GenLocated Ghc.SrcSpanAnnA e] -> [Ghc.GenLocated Ghc.SrcSpanAnnA e]
+addCommaAnns [] = []
+addCommaAnns [a] = [a]
+addCommaAnns (Ghc.L epAnn a : rest) = Ghc.L (EP.addComma epAnn) a : addCommaAnns rest
 
 -- | Adds the import for SPLIT to the module being compiled. Otherwise users
 -- would have to manually add this import everytime they want to do pattern splitting.
@@ -553,6 +744,9 @@ nameToRdrName rdrEnv n =
 
 splitName :: IsString a => a
 splitName = "SPLIT"
+
+fieldsName :: IsString a => a
+fieldsName = "FIELDS"
 
 patternModName :: IsString a => a
 patternModName = "AutoSplit.Pattern"
