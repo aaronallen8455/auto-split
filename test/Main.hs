@@ -50,6 +50,11 @@ main = defaultMain $ testGroup "Tests"
     , testCase "5" $ runTest "Fun5.hs"
     , testCase "6" $ runTest "Fun6.hs"
     ]
+  , testGroup "auto fields"
+    [ testCase "1" $ runTest "Fields1.hs"
+    , testCase "2" $ runTest "Fields2.hs"
+    , testCase "3" $ runTest "Fields3.hs"
+    ]
   ]
 
 testModulePath :: String -> FilePath

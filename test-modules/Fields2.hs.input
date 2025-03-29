@@ -1,0 +1,7 @@
+main :: IO ()
+main = pure ()
+
+data R = R { r1 :: Int, r2 :: Bool, r3 :: Bool }
+
+test :: R
+test = FIELDS R { }

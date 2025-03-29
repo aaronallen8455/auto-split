@@ -1,0 +1,7 @@
+import qualified Import as I
+
+main :: IO ()
+main = pure ()
+
+test :: I.R
+test = I.R { I.r1 = _, I.r2 = _ }

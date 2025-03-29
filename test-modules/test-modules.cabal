@@ -150,3 +150,16 @@ executable Fun6
     import: attrs
     main-is: Fun6.hs
     other-modules: Import
+
+executable Fields1
+    import: attrs
+    main-is: Fields1.hs
+
+executable Fields2
+    import: attrs
+    main-is: Fields2.hs
+
+executable Fields3
+    import: attrs
+    main-is: Fields3.hs
+    other-modules: Import
