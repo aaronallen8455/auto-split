@@ -26,6 +26,9 @@ library
     exposed-modules:  AutoSplit
                       AutoSplit.Pattern
     other-modules: AutoSplit.GhcFacade
+                   AutoSplit.Shared
+                   AutoSplit.Fields
+                   AutoSplit.Split
     -- other-extensions:
     build-depends:    base <5,
                       ghc >=9.6 && <9.13,

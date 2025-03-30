@@ -98,7 +98,7 @@ anchorD1 = Ghc.EpAnn EP.d1 Ghc.noAnn Ghc.emptyComments
 #elif MIN_VERSION_ghc(9,6,0)
   :: Monoid ann => Ghc.SrcAnn ann
 
--- damnit...
+-- blarg
 instance Monoid Ghc.NoEpAnns where
   mempty = Ghc.NoEpAnns
 
