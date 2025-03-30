@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               auto-split
-version:            0.1.0.3
+version:            0.1.0.4
 synopsis: Case splitting plugin
 description: A GHC plugin that performs automatic case splitting
 license:            BSD-3-Clause

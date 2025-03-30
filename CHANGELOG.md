@@ -1,5 +1,9 @@
 # Revision history for auto-split
 
+## 0.1.0.4 -- 2025-03-29
+
+* Add FIELDS pattern for autocompletion of missing record fields
+
 ## 0.1.0.3 -- 2025-03-04
 
 * Remove unnecessary parens for lambda case patterns
