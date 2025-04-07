@@ -54,6 +54,7 @@ main = defaultMain $ testGroup "Tests"
     [ testCase "1" $ runTest "Fields1.hs"
     , testCase "2" $ runTest "Fields2.hs"
     , testCase "3" $ runTest "Fields3.hs"
+    , testCase "4" $ runTest "Fields4.hs"
     ]
   ]
 

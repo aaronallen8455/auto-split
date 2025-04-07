@@ -78,6 +78,21 @@ Compilation will abort when case splitting occurs since the module file has
 been updated. This is done by having GHC emit a custom error. This error does
 not indicate that something went wrong.
 
+### Bonus feature: Automatic record field enumeration
+
+Using `FIELDS` with an incomplete record initialization will result in the
+missing fields being added. For example, compiling this module
+
+```haskell
+mkFoo = FIELDS Foo { }
+```
+
+will result in
+
+```haskell
+mkFoo = Foo { field1 :: _, field2 :: _ }
+```
+
 ### Known limitations
 
 - A module must pass the type checker for splitting to occur, unless the

@@ -163,3 +163,8 @@ executable Fields3
     import: attrs
     main-is: Fields3.hs
     other-modules: Import
+
+executable Fields4
+    import: attrs
+    main-is: Fields4.hs
+    other-modules: Import
